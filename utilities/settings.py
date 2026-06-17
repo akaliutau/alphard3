@@ -16,6 +16,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / os.getenv("ENV_FILE", ".env"))
 load_dotenv(ROOT_DIR / ".env", override=False)
 
+# LiteLLM reads this process env var when it is imported lazily by middleware/llm_middleware.py.
+# Keep it quiet by default; turn on with LITELLM_LOG=DEBUG or LITELLM_DEBUG=true in .env.local.
+os.environ.setdefault("LITELLM_LOG", os.getenv("LITELLM_LOG_LEVEL", "ERROR"))
+
 TEMPLATES_DIR = ROOT_DIR / "templates"
 DATA_DIR = ROOT_DIR / os.getenv("DATA_DIR", "data")
 IMAGE_CACHE_DIR = ROOT_DIR / os.getenv("IMAGE_CACHE_DIR", "img_cache")
@@ -69,6 +73,7 @@ class AppConfig:
     model_name: str = os.getenv("MODEL_NAME", "gemini-2.5-flash")
     model_id: str = os.getenv("MODEL_ID", "vertex_ai/gemini-2.5-flash")
     vertex_location: str = os.getenv("VERTEX_LOCATION", "global")
+    vertex_project: str = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
     litellm_timeout_seconds: int = _int("LITELLM_TIMEOUT_SECONDS", 120)
 
     image_provider: Literal["local", "gcs"] = os.getenv("IMAGE_PROVIDER", "local")  # type: ignore[assignment]

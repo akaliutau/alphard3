@@ -9,6 +9,10 @@ from core.mt5_api import MT5Client, MT5Config
 from utilities.settings import config
 
 
+#from core.mt5_api import MT5Client, MT5Config
+#from utilities.settings import config
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Smoke-test the MT5 proxy endpoints used by Alphard")
     parser.add_argument("--symbol", default=config.symbols[0])

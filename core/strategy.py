@@ -71,6 +71,7 @@ class Strategy:
                 transformer=coerce_to_simple_string,
                 metadata={
                     "vertex_location": config.vertex_location,
+                    "vertex_project": config.vertex_project,
                     "timeout": config.litellm_timeout_seconds,
                 },
                 metrics=metrics,
@@ -85,7 +86,19 @@ class Strategy:
             uid=uid,
             strategy=self.name,
             timeframe=config.timeframe,
-            data={"model": asdict(self.model_conf), "metrics": metrics.to_dict(), "raw": raw[:4000]},
+            data={
+                "model": asdict(self.model_conf),
+                "metrics": metrics.to_dict(),
+                "raw": raw[:4000],
+                "parse": {
+                    "status": decision.status,
+                    "confidence": decision.confidence,
+                    "allocation": decision.allocation,
+                    "has_sl": decision.stop_loss is not None,
+                    "has_tp": decision.take_profit is not None,
+                    "error": decision.error,
+                },
+            },
         )
         self.ledger.log(
             EventType.DECISION,

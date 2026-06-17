@@ -24,7 +24,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env.local
-ENV_FILE=.env.local python scripts/smoke_mt5_api.py --symbol EURUSD
+
+```bash
+ENV_FILE=.env.local  python -m tests.smoke_mt5_api  --symbol EURUSD
 ENV_FILE=.env.local python app.py --once
 ENV_FILE=.env.local python app.py
 ```
@@ -33,7 +35,7 @@ ENV_FILE=.env.local python app.py
 
 ```bash
 source scripts/set_env.sh
-bash scripts/deploy_infra.sh
+scripts/deploy_infra.sh
 ```
 
 The script creates a service account, grants Vertex AI and Storage permissions, creates a GCS bucket, and optionally creates a light Compute Engine VM with a persistent disk mounted for state.

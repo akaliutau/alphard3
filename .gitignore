@@ -219,4 +219,7 @@ __marimo__/
 .idea
 notes.txt
 *-key.json
+data/
+img_cache/
+*.sqlite
 

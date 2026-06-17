@@ -5,8 +5,9 @@ set -euo pipefail
 : "${REGION:=us-central1}"
 : "${ZONE:=us-central1-a}"
 : "${SA_NAME:=alphard-trader-sa}"
+: "${KEY_FILE_NAME:=alphard-trader-sa-key.json}"
 : "${SA_DISPLAY_NAME:=Alphard Trader Service Account}"
-: "${BUCKET_NAME:=alphard-charts-${PROJECT_ID}}"
+: "${BUCKET_NAME:=charts-${PROJECT_ID}}"
 : "${VM_NAME:=alphard-vm}"
 : "${VM_MACHINE_TYPE:=e2-micro}"
 : "${VM_DISK_SIZE:=20GB}"
@@ -31,6 +32,25 @@ if ! gcloud iam service-accounts describe "${SA_EMAIL}" >/dev/null 2>&1; then
 else
   echo "Service account exists: ${SA_EMAIL}"
 fi
+
+echo "Waiting to changes update"
+sleep 10
+
+# ==========================================
+# 3. Create & Save the API Key (JSON Key)
+# ==========================================
+if [ -f "$KEY_FILE_NAME" ]; then
+    echo "✅ API Key already exists locally at ${KEY_FILE_NAME}. Skipping creation to prevent key rotation."
+else
+    echo "Generating and saving Service Account JSON key to ${KEY_FILE_NAME}..."
+    gcloud iam service-accounts keys create $KEY_FILE_NAME \
+        --iam-account=$SA_EMAIL
+
+    # Secure the key file locally
+    chmod 600 $KEY_FILE_NAME
+    echo "✅ API Key successfully saved and secured: $KEY_FILE_NAME"
+fi
+
 
 echo "Granting Vertex AI access"
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
