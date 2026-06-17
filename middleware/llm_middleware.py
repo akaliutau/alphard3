@@ -193,6 +193,9 @@ def _build_litellm_params(config: ModelConfig, metadata: dict[str, Any]) -> dict
     params: dict[str, Any] = {
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
+        # Safer across providers/models: LiteLLM drops unsupported OpenAI-style
+        # params instead of failing the call.
+        "drop_params": bool(metadata.get("drop_params", True)),
     }
     if metadata.get("timeout"):
         params["timeout"] = metadata["timeout"]

@@ -117,20 +117,27 @@ class Ledger:
             ).fetchone()
         return int(row["t"]) if row and row["t"] is not None else None
 
-    def load_candles_df(self, symbol: str, timeframe: str, limit: int):
+    def load_candles_df(self, symbol: str, timeframe: str, limit: int, end_time: int | None = None):
         import pandas as pd
 
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT ts_ms AS ts, open, high, low, close, volume, time_iso
+        query = """
+                SELECT ts_ms AS ts, open, high, low, close, volume, time_iso, time
                 FROM candles
                 WHERE symbol=? AND timeframe=?
+                {where_end}
                 ORDER BY time DESC
                 LIMIT ?
-                """,
-                (symbol, timeframe, limit),
-            ).fetchall()
+                """
+        params: tuple[Any, ...]
+        if end_time is None:
+            query = query.format(where_end="")
+            params = (symbol, timeframe, limit)
+        else:
+            query = query.format(where_end="AND time <= ?")
+            params = (symbol, timeframe, end_time, limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
         rows = list(reversed([dict(r) for r in rows]))
         df = pd.DataFrame(rows)
         if not df.empty:

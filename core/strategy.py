@@ -30,7 +30,30 @@ class Strategy:
         )
 
     async def analyze(self, uid: int, candles: pd.DataFrame, positions: list[dict[str, Any]]) -> Decision:
-        chart_path = generate_chart_image_v2(candles, target_uid=uid, window_size=config.chart_window_bars, symbol=self.symbol.name)
+        target_view = _slice_to_uid(candles, uid, window_size=config.chart_window_bars)
+        if target_view.empty:
+            logger.error("%s uid=%s no candles available after slicing to target", self.symbol.name, uid)
+            return Decision(status="ERROR", error="target candle unavailable")
+
+        current = target_view.iloc[-1]
+        logger.info(
+            "%s uid=%s current candle time=%s OHLCV O=%.5f H=%.5f L=%.5f C=%.5f V=%.0f rows=%s window_start=%s window_end=%s range_low=%.5f range_high=%.5f",
+            self.symbol.name,
+            uid,
+            current.get("time_iso", current.get("datetime", "")),
+            float(current["open"]),
+            float(current["high"]),
+            float(current["low"]),
+            float(current["close"]),
+            float(current["volume"]),
+            len(target_view),
+            str(target_view.iloc[0].get("time_iso", target_view.iloc[0].get("datetime", ""))),
+            str(target_view.iloc[-1].get("time_iso", target_view.iloc[-1].get("datetime", ""))),
+            float(target_view["low"].min()),
+            float(target_view["high"].max()),
+        )
+
+        chart_path = generate_chart_image_v2(target_view, target_uid=uid, window_size=config.chart_window_bars, symbol=self.symbol.name)
         if chart_path is None:
             return Decision(status="ERROR", error="chart generation failed")
 
@@ -44,7 +67,7 @@ class Strategy:
             data={"chart_path": str(chart_path), **image_ref.ledger_ref},
         )
 
-        market_summary = _market_summary(candles)
+        market_summary = _market_summary(target_view)
         prompt = self.prompt_manager.compose_prompt(
             f"{self.name}.j2",
             pair_name=self.symbol.name,
@@ -73,11 +96,22 @@ class Strategy:
                     "vertex_location": config.vertex_location,
                     "vertex_project": config.vertex_project,
                     "timeout": config.litellm_timeout_seconds,
+                    "debug": config.litellm_debug,
+                    "log_prompt": config.litellm_log_prompt,
+                    "log_response": config.litellm_log_response,
+                    "response_preview_chars": config.litellm_response_preview_chars,
+                    "drop_params": config.litellm_drop_params,
+                    "suppress_pydantic_warnings": config.litellm_suppress_pydantic_warnings,
                 },
                 metrics=metrics,
             )
             decision = parse_strategy_output(raw)
+            if config.litellm_debug:
+                logger.info("%s uid=%s LLM parsed status=%s confidence=%.2f sl=%s tp=%s entry=%s",
+                            self.symbol.name, uid, decision.status, decision.confidence,
+                            decision.stop_loss, decision.take_profit, decision.entry_price)
         except Exception as exc:
+            logger.exception("%s uid=%s LLM analysis failed: %s", self.symbol.name, uid, exc)
             decision = Decision(status="ERROR", error=str(exc), raw_text=raw)
 
         self.ledger.log(
@@ -90,6 +124,7 @@ class Strategy:
                 "model": asdict(self.model_conf),
                 "metrics": metrics.to_dict(),
                 "raw": raw[:4000],
+                "current_candle": _candle_to_dict(current),
                 "parse": {
                     "status": decision.status,
                     "confidence": decision.confidence,
@@ -108,7 +143,7 @@ class Strategy:
             timeframe=config.timeframe,
             data=asdict(decision),
         )
-        logger.info("%s %s decision=%s confidence=%.2f", self.symbol.name, uid, decision.status, decision.confidence)
+        logger.info("%s %s decision=%s confidence=%.2f allocation=%.2f entry=%s sl=%s tp=%s", self.symbol.name, uid, decision.status, decision.confidence, decision.allocation, decision.entry_price, decision.stop_loss, decision.take_profit)
         return decision
 
 
@@ -128,7 +163,7 @@ def parse_strategy_output(text: str) -> Decision:
             entry_price=_float_or_none(obj.get("entry_price")),
             order_kind=str(obj.get("order_kind") or "limit").lower(),  # type: ignore[arg-type]
             rationale=str(obj.get("rationale") or obj.get("analysis") or ""),
-            levels={},
+            levels=obj.get("levels") if isinstance(obj.get("levels"), dict) else {},
             raw_text=text,
         )
 
@@ -203,3 +238,32 @@ def _clamp_float(value: Any, lo: float, hi: float) -> float:
     except Exception:
         v = 0.0
     return max(lo, min(hi, v))
+
+
+def _slice_to_uid(df: pd.DataFrame, uid: int, window_size: int) -> pd.DataFrame:
+    if df is None or df.empty or "uid" not in df.columns:
+        return pd.DataFrame()
+    work = df.sort_values("uid").copy()
+    matches = work.index[work["uid"].astype(int) == int(uid)].tolist()
+    if not matches:
+        return pd.DataFrame()
+    target_idx = matches[-1]
+    pos = work.index.get_loc(target_idx)
+    if isinstance(pos, slice):
+        pos = pos.stop - 1
+    elif hasattr(pos, "__len__") and not isinstance(pos, int):
+        pos = int(pos[-1])
+    start = max(0, int(pos) - window_size + 1)
+    return work.iloc[start:int(pos) + 1].reset_index(drop=True)
+
+
+def _candle_to_dict(r: pd.Series) -> dict[str, Any]:
+    return {
+        "time_iso": str(r.get("time_iso", r.get("datetime", ""))),
+        "open": float(r.get("open", 0.0)),
+        "high": float(r.get("high", 0.0)),
+        "low": float(r.get("low", 0.0)),
+        "close": float(r.get("close", 0.0)),
+        "volume": float(r.get("volume", 0.0)),
+        "uid": int(r.get("uid", 0)),
+    }

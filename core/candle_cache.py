@@ -32,6 +32,8 @@ class CandleCache:
 
         candles = await self.api.bars(symbol, timeframe, start=start, end=end_boundary)
         inserted = self.ledger.upsert_candles(candles)
+        first_bar = candles[0].time_iso if candles else None
+        last_bar = candles[-1].time_iso if candles else None
         self.ledger.log(
             EventType.DATA_SYNC,
             symbol=symbol,
@@ -43,10 +45,12 @@ class CandleCache:
                 "requested_end": end_boundary.isoformat(),
                 "received": len(candles),
                 "upserted": inserted,
+                "first_bar": first_bar,
+                "last_bar": last_bar,
             },
         )
-        logger.info("%s %s candle sync: %s rows", symbol, timeframe, inserted)
+        logger.info("%s %s candle sync: %s rows [%s -> %s]", symbol, timeframe, inserted, first_bar, last_bar)
         return inserted
 
-    def load_chart_frame(self, symbol: str, timeframe: str, bars: int):
-        return self.ledger.load_candles_df(symbol, timeframe, limit=bars)
+    def load_chart_frame(self, symbol: str, timeframe: str, bars: int, end_time: int | None = None):
+        return self.ledger.load_candles_df(symbol, timeframe, limit=bars, end_time=end_time)

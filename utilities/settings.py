@@ -73,8 +73,14 @@ class AppConfig:
     model_name: str = os.getenv("MODEL_NAME", "gemini-2.5-flash")
     model_id: str = os.getenv("MODEL_ID", "vertex_ai/gemini-2.5-flash")
     vertex_location: str = os.getenv("VERTEX_LOCATION", "global")
-    vertex_project: str = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+    vertex_project: str | None = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
     litellm_timeout_seconds: int = _int("LITELLM_TIMEOUT_SECONDS", 120)
+    litellm_debug: bool = _bool("LITELLM_DEBUG", False)
+    litellm_log_prompt: bool = _bool("LITELLM_LOG_PROMPT", False)
+    litellm_log_response: bool = _bool("LITELLM_LOG_RESPONSE", False)
+    litellm_response_preview_chars: int = _int("LITELLM_RESPONSE_PREVIEW_CHARS", 600)
+    litellm_drop_params: bool = _bool("LITELLM_DROP_PARAMS", True)
+    litellm_suppress_pydantic_warnings: bool = _bool("LITELLM_SUPPRESS_PYDANTIC_WARNINGS", True)
 
     image_provider: Literal["local", "gcs"] = os.getenv("IMAGE_PROVIDER", "local")  # type: ignore[assignment]
     gcs_bucket_name: str | None = os.getenv("GCS_BUCKET_NAME") or os.getenv("BUCKET_NAME")

@@ -53,19 +53,25 @@ class AlphardApp:
                 raise
             except Exception as exc:
                 logger.exception("cycle failed: %s", exc)
-                self.ledger.log(
-                    EventType.ERROR, None, None, None, {"error": str(exc)}, timeframe=config.timeframe)
+                self.ledger.log(EventType.ERROR, None, None, None, {"error": str(exc)}, timeframe=config.timeframe)
             await asyncio.sleep(next_wakeup_seconds(config.run_interval_minutes))
 
     async def run_once(self, now: datetime) -> None:
         target_open = latest_closed_bar_open(now, config.timeframe, config.candle_close_delay_seconds)
         target_uid = candle_uid(target_open)
-        end_boundary = floor_to_timeframe(now - timedelta(seconds=config.candle_close_delay_seconds), config.timeframe)
-        logger.info("cycle target_uid=%s target_open=%s", target_uid, target_open.isoformat())
+        # Only sync through the last fully closed candle. Do not include the currently open bucket.
+        end_boundary = target_open
+        target_close = target_open + timedelta(minutes=timeframe_minutes(config.timeframe))
+        logger.info(
+            "cycle now_utc=%s target_uid=%s target_open=%s target_close=%s",
+            now.astimezone(timezone.utc).isoformat(),
+            target_uid,
+            target_open.isoformat(),
+            target_close.isoformat(),
+        )
 
         ready = await self.mt5.ready()
-        self.ledger.log(
-            EventType.SYSTEM, None, target_uid, None, {"ready": ready}, timeframe=config.timeframe)
+        self.ledger.log(EventType.SYSTEM, None, target_uid, None, {"ready": ready}, timeframe=config.timeframe)
 
         tasks = [self.process_symbol(Symbol(name=s), target_uid, end_boundary) for s in config.symbols]
         await asyncio.gather(*tasks)
@@ -80,6 +86,7 @@ class AlphardApp:
             symbol.name,
             config.timeframe,
             max(config.chart_window_bars, config.candle_warmup_bars),
+            end_time=int(end_boundary.timestamp()),
         )
         if candles.empty or target_uid not in set(candles["uid"].astype(int)):
             logger.warning("%s uid=%s not available in cache yet", symbol.name, target_uid)
