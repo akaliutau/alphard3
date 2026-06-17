@@ -115,7 +115,7 @@ def parse_strategy_output(text: str) -> Decision:
             entry_price=_float_or_none(obj.get("entry_price")),
             order_kind=str(obj.get("order_kind") or "limit").lower(),  # type: ignore[arg-type]
             rationale=str(obj.get("rationale") or obj.get("analysis") or ""),
-            levels=obj.get("levels") if isinstance(obj.get("levels"), dict) else {},
+            levels={},
             raw_text=text,
         )
 

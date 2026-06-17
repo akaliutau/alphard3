@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Usage: source scripts/set_env.sh
-export PROJECT_ID="dev-ai-trader"
+export PROJECT_ID="alphard3"
 export REGION="us-central1"
 export ZONE="us-central1-a"
 export SA_NAME="alphard-trader-sa"
