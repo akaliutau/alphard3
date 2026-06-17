@@ -101,15 +101,60 @@ class RiskEngine:
             return RiskResult(False, "decision has no side")
         return None
 
+    def _check_entry_price(self, d: Decision, tick: Tick, info: SymbolInfo, entry: float) -> RiskResult | None:
+        if config.execution_mode != "pending_limit":
+            return None
+
+        min_dist = config.min_stop_distance_points * info.point
+
+        if d.side == "buy":
+            if not (entry < tick.bid):
+                return RiskResult(False, f"BUY_LIMIT entry must be below current bid; entry={entry}, bid={tick.bid}")
+            if not (float(d.stop_loss) < entry < float(d.take_profit)):
+                return RiskResult(False,
+                                  f"BUY_LIMIT requires stop_loss < entry < take_profit; sl={d.stop_loss}, entry={entry}, tp={d.take_profit}")
+            if abs(entry - float(d.stop_loss)) < min_dist:
+                return RiskResult(False, "BUY_LIMIT stop_loss too close to entry")
+
+        elif d.side == "sell":
+            if not (entry > tick.ask):
+                return RiskResult(False, f"SELL_LIMIT entry must be above current ask; entry={entry}, ask={tick.ask}")
+            if not (float(d.take_profit) < entry < float(d.stop_loss)):
+                return RiskResult(False,
+                                  f"SELL_LIMIT requires take_profit < entry < stop_loss; tp={d.take_profit}, entry={entry}, sl={d.stop_loss}")
+            if abs(float(d.stop_loss) - entry) < min_dist:
+                return RiskResult(False, "SELL_LIMIT stop_loss too close to entry")
+
+        return None
+
+    def _pending_limit_gap(self, info: SymbolInfo) -> float:
+        raw_stops_level = info.raw.get("trade_stops_level") or info.raw.get("stops_level") or 0
+        try:
+            broker_stop_points = int(raw_stops_level)
+        except Exception:
+            broker_stop_points = 0
+
+        points = max(config.entry_pullback_points, broker_stop_points + 1, 1)
+        return points * info.point
+
     def _entry_price(self, d: Decision, tick: Tick, info: SymbolInfo) -> float:
-        if d.entry_price is not None and d.entry_price > 0:
-            return round(float(d.entry_price), info.digits)
-        pullback = config.entry_pullback_points * info.point
         if config.execution_mode == "market":
             return round(tick.ask if d.side == "buy" else tick.bid, info.digits)
+
+        gap = self._pending_limit_gap(info)
+        requested = round(float(d.entry_price),
+                          info.digits) if d.entry_price is not None and d.entry_price > 0 else None
+
         if d.side == "buy":
-            return round(tick.ask - pullback, info.digits)
-        return round(tick.bid + pullback, info.digits)
+            safe_price = round(tick.bid - gap, info.digits)
+            if requested is None or requested >= tick.bid:
+                return safe_price
+            return round(min(requested, safe_price), info.digits)
+
+        safe_price = round(tick.ask + gap, info.digits)
+        if requested is None or requested <= tick.ask:
+            return safe_price
+        return round(max(requested, safe_price), info.digits)
 
     def _volume(self, d: Decision, info: SymbolInfo) -> float:
         requested = config.base_volume * min(abs(d.allocation), config.max_allocation)

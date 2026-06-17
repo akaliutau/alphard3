@@ -49,7 +49,7 @@ class ExecutionEngine:
             "tp": round(float(decision.take_profit), info.digits) if decision.take_profit is not None else None,
             "deviation": config.mt5_deviation,
             "magic": config.mt5_magic,
-            "comment": f"{config.app_name}-{strategy}-{uid}",
+            #"comment": f"{config.app_name}-{strategy}-{uid}",
             "type_filling": config.mt5_type_filling,
         }
         if config.execution_mode == "pending_limit":

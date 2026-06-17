@@ -17,3 +17,15 @@ def test_risk_approves_basic_buy(monkeypatch):
     r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
     assert r.approved
     assert r.volume >= 0.01
+
+def test_risk_adjusts_invalid_sell_limit_entry_above_ask(monkeypatch):
+    d = Decision(status="SELL", allocation=-0.5, confidence=0.9, stop_loss=160.31, take_profit=160.12, entry_price=160.22)
+    tick = Tick(bid=160.24, ask=160.25)
+    info = SymbolInfo(name="USDJPY", digits=3, point=0.001, volume_min=0.01, volume_step=0.01)
+
+    r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
+
+    assert r.approved
+    assert r.entry_price is not None
+    assert r.entry_price > tick.ask
+    assert d.take_profit < r.entry_price < d.stop_loss

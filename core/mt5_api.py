@@ -160,8 +160,7 @@ class MT5Client:
         return data
 
     async def cancel_order(self, ticket: int, comment: str | None = None) -> dict[str, Any]:
-        params = {"comment": comment} if comment else None
-        data = await self._request("DELETE", f"/v1/orders/{ticket}", params=params)
+        data = await self._request("DELETE", f"/v1/orders/{ticket}")
         _assert_trade_ok(data, "cancel_order")
         return data
 
