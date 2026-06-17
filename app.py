@@ -12,7 +12,7 @@ from core.models import Symbol
 from core.mt5_api import MT5Client, MT5Config
 from core.risk import RiskEngine
 from core.strategy import Strategy
-from core.timeframes import candle_uid, floor_to_timeframe, latest_closed_bar_open, next_wakeup_seconds, timeframe_minutes
+from core.timeframes import broker_now_from_tick, candle_uid, current_basket_open, next_wakeup_seconds, timeframe_minutes
 from middleware.llm_middleware import ModelConfig
 from utilities.settings import config, logger
 
@@ -21,7 +21,7 @@ class AlphardApp:
     """Async stateful trading daemon.
 
     Loop:
-      wake -> determine latest closed candle -> sync missing bars -> render chart -> call VLM -> risk -> execute -> sleep.
+      wake -> read broker tick time -> determine current broker basket -> sync bars -> render chart -> call VLM -> risk -> execute -> sleep.
     """
 
     def __init__(self):
@@ -57,31 +57,42 @@ class AlphardApp:
             await asyncio.sleep(next_wakeup_seconds(config.run_interval_minutes))
 
     async def run_once(self, now: datetime) -> None:
-        target_open = latest_closed_bar_open(now, config.timeframe, config.candle_close_delay_seconds)
-        target_uid = candle_uid(target_open)
-        # Only sync through the last fully closed candle. Do not include the currently open bucket.
-        end_boundary = target_open
+        app_now = now.astimezone(timezone.utc)
+        logger.info("cycle app_now_utc=%s symbols=%s timeframe=%s", app_now.isoformat(), ",".join(config.symbols), config.timeframe)
+
+        ready = await self.mt5.ready()
+        self.ledger.log(EventType.SYSTEM, None, None, None, {"ready": ready, "app_now_utc": app_now.isoformat()}, timeframe=config.timeframe)
+
+        tasks = [self.process_symbol(Symbol(name=s), app_now=app_now) for s in config.symbols]
+        await asyncio.gather(*tasks)
+
+    async def process_symbol(self, symbol: Symbol, app_now: datetime) -> None:
+        # The broker/MetaQuotes server clock is the source of truth for bar baskets.
+        # Local wall-clock time can be offset from the MT5 server clock.
+        tick, info = await self.mt5.tick(symbol.name)
+        broker_now = broker_now_from_tick(tick.time, tick.time_msc, fallback=app_now)
+        target_open = current_basket_open(broker_now, config.timeframe)
         target_close = target_open + timedelta(minutes=timeframe_minutes(config.timeframe))
+        target_uid = candle_uid(target_open)
+        end_boundary = target_open
+
         logger.info(
-            "cycle now_utc=%s target_uid=%s target_open=%s target_close=%s",
-            now.astimezone(timezone.utc).isoformat(),
+            "%s broker_now=%s tick_time=%s tick_time_msc=%s target_uid=%s target_open=%s target_close=%s app_now_utc=%s",
+            symbol.name,
+            broker_now.isoformat(),
+            tick.time,
+            tick.time_msc,
             target_uid,
             target_open.isoformat(),
             target_close.isoformat(),
+            app_now.isoformat(),
         )
 
-        ready = await self.mt5.ready()
-        self.ledger.log(EventType.SYSTEM, None, target_uid, None, {"ready": ready}, timeframe=config.timeframe)
-
-        tasks = [self.process_symbol(Symbol(name=s), target_uid, end_boundary) for s in config.symbols]
-        await asyncio.gather(*tasks)
-
-    async def process_symbol(self, symbol: Symbol, target_uid: int, end_boundary: datetime) -> None:
-        if self.ledger.get_last_decision(symbol.name, target_uid, config.strategy_name):
-            logger.info("%s uid=%s already processed", symbol.name, target_uid)
+        if self.ledger.is_basket_processed(symbol.name, config.timeframe, target_uid, config.strategy_name):
+            logger.info("%s uid=%s broker basket already processed", symbol.name, target_uid)
             return
 
-        await self.cache.sync_to(symbol.name, config.timeframe, end_boundary=end_boundary)
+        await self.cache.sync_to(symbol.name, config.timeframe, end_boundary=end_boundary, refresh_end_bar=True)
         candles = self.cache.load_chart_frame(
             symbol.name,
             config.timeframe,
@@ -89,18 +100,23 @@ class AlphardApp:
             end_time=int(end_boundary.timestamp()),
         )
         if candles.empty or target_uid not in set(candles["uid"].astype(int)):
-            logger.warning("%s uid=%s not available in cache yet", symbol.name, target_uid)
+            logger.warning("%s uid=%s target broker basket not available in cache yet", symbol.name, target_uid)
             self.ledger.log(
                 EventType.SYSTEM,
                 symbol.name,
                 target_uid,
                 config.strategy_name,
-                {"skipped": "target candle not available", "rows": len(candles)},
+                {
+                    "skipped": "target broker basket not available",
+                    "rows": len(candles),
+                    "broker_now": broker_now.isoformat(),
+                    "target_open": target_open.isoformat(),
+                    "target_close": target_close.isoformat(),
+                },
                 timeframe=config.timeframe,
             )
             return
 
-        tick, info = await self.mt5.tick(symbol.name)
         positions = await self.mt5.positions(symbol=symbol.name)
         orders = await self.mt5.orders(symbol=symbol.name)
 
@@ -128,7 +144,23 @@ class AlphardApp:
                 timeframe=config.timeframe,
                 data={"cleanup": cleanup},
             )
-        await self.exec.execute(symbol.name, target_uid, config.strategy_name, decision, risk, tick, info)
+        execution = await self.exec.execute(symbol.name, target_uid, config.strategy_name, decision, risk, tick, info)
+        self.ledger.mark_basket_processed(
+            symbol=symbol.name,
+            timeframe=config.timeframe,
+            uid=target_uid,
+            strategy=config.strategy_name,
+            data={
+                "broker_now": broker_now.isoformat(),
+                "app_now_utc": app_now.isoformat(),
+                "target_open": target_open.isoformat(),
+                "target_close": target_close.isoformat(),
+                "decision": decision.status,
+                "risk_approved": risk.approved,
+                "execution_attempted": execution.attempted,
+                "execution_ok": execution.ok,
+            },
+        )
 
 
 def parse_args() -> argparse.Namespace:

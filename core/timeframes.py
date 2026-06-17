@@ -30,6 +30,26 @@ def floor_to_timeframe(dt: datetime, timeframe: str) -> datetime:
     return dt.replace(hour=floored // 60, minute=floored % 60)
 
 
+
+def broker_now_from_tick(tick_time: int | None = None, tick_time_msc: int | None = None, fallback: datetime | None = None) -> datetime:
+    """Return MetaQuotes server-clock now from a tick timestamp.
+
+    MT5 bar timestamps and tick timestamps live on the broker/server clock.
+    We intentionally store this as a timezone-aware datetime with UTC tzinfo as a
+    neutral timestamp container; it should be compared only with other MT5/bar
+    timestamps from the same server, not with wall-clock local time.
+    """
+    if tick_time_msc is not None:
+        return datetime.fromtimestamp(int(tick_time_msc) / 1000.0, timezone.utc).replace(microsecond=0)
+    if tick_time is not None:
+        return datetime.fromtimestamp(int(tick_time), timezone.utc)
+    return (fallback or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
+
+
+def current_basket_open(now: datetime, timeframe: str) -> datetime:
+    """Open time of the basket that `now` is currently falling into."""
+    return floor_to_timeframe(now, timeframe)
+
 def latest_closed_bar_open(now: datetime, timeframe: str, close_delay_seconds: int = 30) -> datetime:
     safe_now = now.astimezone(timezone.utc) - timedelta(seconds=close_delay_seconds)
     end_boundary = floor_to_timeframe(safe_now, timeframe)

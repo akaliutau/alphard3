@@ -39,3 +39,21 @@ def test_slice_to_uid_excludes_future_bars():
     assert int(out.iloc[-1]["uid"]) == target_uid
     assert len(out) == 5
     assert out.iloc[-1]["time_iso"] == "2026-06-17 12:00 UTC"
+
+from core.timeframes import broker_now_from_tick, current_basket_open
+
+
+def test_broker_tick_time_is_current_basket_source():
+    # Local wall clock is irrelevant. A MetaQuotes tick inside 16:00-16:15
+    # should target the 16:00 M15 basket.
+    broker_ts = int(datetime(2026, 6, 17, 16, 7, 3, tzinfo=timezone.utc).timestamp())
+    broker_now = broker_now_from_tick(tick_time=broker_ts)
+    assert broker_now == datetime(2026, 6, 17, 16, 7, 3, tzinfo=timezone.utc)
+    assert current_basket_open(broker_now, "M15") == datetime(2026, 6, 17, 16, 0, tzinfo=timezone.utc)
+
+
+def test_broker_tick_time_msc_takes_precedence():
+    broker_msc = int(datetime(2026, 6, 17, 16, 14, 59, tzinfo=timezone.utc).timestamp() * 1000)
+    broker_now = broker_now_from_tick(tick_time=123, tick_time_msc=broker_msc)
+    assert broker_now == datetime(2026, 6, 17, 16, 14, 59, tzinfo=timezone.utc)
+    assert current_basket_open(broker_now, "M15") == datetime(2026, 6, 17, 16, 0, tzinfo=timezone.utc)

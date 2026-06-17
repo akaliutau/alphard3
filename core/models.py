@@ -51,7 +51,9 @@ class SymbolInfo:
 class Tick:
     bid: float
     ask: float
+    # MetaQuotes/MT5 server-clock timestamp. We use this as broker "now" for candle baskets.
     time: int | None = None
+    time_msc: int | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property

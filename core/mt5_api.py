@@ -76,7 +76,8 @@ class MT5Client:
         tick = Tick(
             bid=float(tick_raw.get("bid") or 0.0),
             ask=float(tick_raw.get("ask") or 0.0),
-            time=tick_raw.get("time"),
+            time=int(tick_raw["time"]) if tick_raw.get("time") is not None else None,
+            time_msc=int(tick_raw["time_msc"]) if tick_raw.get("time_msc") is not None else None,
             raw=tick_raw,
         )
         info = SymbolInfo(

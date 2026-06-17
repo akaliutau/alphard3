@@ -9,26 +9,42 @@ from utilities.settings import logger
 
 
 class CandleCache:
-    """Stateful SQLite candle cache that only asks MT5 for missing closed bars."""
+    """Stateful SQLite candle cache that asks MT5 only for missing bars and the current forming broker bar when requested."""
 
     def __init__(self, ledger: Ledger, api: MT5Client, warmup_bars: int = 220):
         self.ledger = ledger
         self.api = api
         self.warmup_bars = warmup_bars
 
-    async def sync_to(self, symbol: str, timeframe: str, end_boundary: datetime) -> int:
-        """Fetch missing candles with open times before/at end_boundary as supported by the API."""
+    async def sync_to(self, symbol: str, timeframe: str, end_boundary: datetime, refresh_end_bar: bool = False) -> int:
+        """Fetch missing candles up to and including `end_boundary`.
+
+        When `refresh_end_bar=True`, the final basket is treated as the currently
+        forming MetaQuotes server-time bar. It is re-requested and upserted so the
+        local cache has the freshest snapshot before analysis.
+        """
         end_boundary = end_boundary.astimezone(timezone.utc)
         tf_min = timeframe_minutes(timeframe)
+        tf_delta = timedelta(minutes=tf_min)
         latest = self.ledger.latest_candle_time(symbol, timeframe)
 
         if latest is None:
             start = end_boundary - timedelta(minutes=tf_min * self.warmup_bars)
         else:
-            start = datetime.fromtimestamp(latest, timezone.utc) + timedelta(minutes=tf_min)
+            latest_dt = datetime.fromtimestamp(latest, timezone.utc)
+            if refresh_end_bar:
+                if latest_dt >= end_boundary:
+                    # Re-fetch the current forming basket plus one prior bar. Some MT5
+                    # range APIs return nothing when start == end.
+                    start = end_boundary - tf_delta
+                else:
+                    # Re-fetch from the latest known bar so gaps and the end bar are both covered.
+                    start = latest_dt
+            else:
+                start = latest_dt + tf_delta
 
         if start >= end_boundary:
-            return 0
+            start = end_boundary - tf_delta
 
         candles = await self.api.bars(symbol, timeframe, start=start, end=end_boundary)
         inserted = self.ledger.upsert_candles(candles)
@@ -43,13 +59,17 @@ class CandleCache:
             data={
                 "requested_start": start.isoformat(),
                 "requested_end": end_boundary.isoformat(),
+                "refresh_end_bar": refresh_end_bar,
                 "received": len(candles),
                 "upserted": inserted,
                 "first_bar": first_bar,
                 "last_bar": last_bar,
             },
         )
-        logger.info("%s %s candle sync: %s rows [%s -> %s]", symbol, timeframe, inserted, first_bar, last_bar)
+        logger.info(
+            "%s %s candle sync: %s rows [%s -> %s] requested=[%s -> %s] refresh_end_bar=%s",
+            symbol, timeframe, inserted, first_bar, last_bar, start.isoformat(), end_boundary.isoformat(), refresh_end_bar,
+        )
         return inserted
 
     def load_chart_frame(self, symbol: str, timeframe: str, bars: int, end_time: int | None = None):

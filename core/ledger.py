@@ -14,6 +14,7 @@ from utilities.settings import logger
 
 class EventType(str, Enum):
     DATA_SYNC = "DATA_SYNC"
+    BASKET_PROCESSED = "BASKET_PROCESSED"
     CHART = "CHART"
     LLM = "LLM"
     DECISION = "DECISION"
@@ -168,6 +169,27 @@ class Ledger:
 
     def get_last_decision(self, symbol: str, uid: int, strategy: str) -> dict[str, Any] | None:
         return self.get_last_event(EventType.DECISION, symbol, uid, strategy)
+
+    def is_basket_processed(self, symbol: str, timeframe: str, uid: int, strategy: str) -> bool:
+        """Return true once a symbol/timeframe basket has been handled.
+
+        DECISION is included for compatibility with older runs before the explicit
+        BASKET_PROCESSED marker existed.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM event_log
+                WHERE symbol=? AND timeframe=? AND uid=? AND strategy=?
+                  AND event_type IN (?, ?)
+                LIMIT 1
+                """,
+                (symbol, timeframe, uid, strategy, EventType.BASKET_PROCESSED.value, EventType.DECISION.value),
+            ).fetchone()
+        return row is not None
+
+    def mark_basket_processed(self, symbol: str, timeframe: str, uid: int, strategy: str, data: Any) -> None:
+        self.log(EventType.BASKET_PROCESSED, symbol=symbol, uid=uid, strategy=strategy, timeframe=timeframe, data=data)
 
     def recent_llm_metrics(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._connect() as conn:
