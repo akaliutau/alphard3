@@ -60,6 +60,7 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --role="roles/aiplatform.user" \
   --quiet >/dev/null
 
+
 if ! gcloud storage buckets describe "gs://${BUCKET_NAME}" >/dev/null 2>&1; then
   echo "Creating bucket gs://${BUCKET_NAME}"
   gcloud storage buckets create "gs://${BUCKET_NAME}" \

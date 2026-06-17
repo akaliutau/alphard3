@@ -77,6 +77,12 @@ if ! gcloud artifacts repositories describe "$AR_REPO" --location "$REGION" >/de
     --description="Alphard Docker images"
 fi
 
+gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
+  --project "$PROJECT_ID" \
+  --location "$REGION" \
+  --member "serviceAccount:${SA_EMAIL}" \
+  --role "roles/artifactregistry.reader"
+
 gcloud builds submit --tag "$IMAGE_URI" .
 
 if ! gcloud compute disks describe "$STATE_DISK" --zone "$ZONE" >/dev/null 2>&1; then
@@ -125,6 +131,7 @@ ALPHARD_STATE_DIR=/var/lib/alphard
 ALPHARD_CONTAINER_NAME=alphard-run
 ALPHARD_DOCKER_MEMORY=${ALPHARD_DOCKER_MEMORY}
 ALPHARD_DOCKER_CPUS=${ALPHARD_DOCKER_CPUS}
+ALPHARD_DIAGNOSTICS_ONLY=${ALPHARD_DIAGNOSTICS_ONLY:-true}
 EOF2
 
 cp "$ENV_CLOUD_FILE" "$TMPDIR/etc/alphard/.env.cloud"

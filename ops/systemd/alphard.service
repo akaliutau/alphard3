@@ -15,11 +15,6 @@ KillMode=control-group
 SendSIGKILL=yes
 Restart=no
 
-# Recover from any orphaned previous container before starting a new slot.
-ExecStartPre=-/usr/bin/docker rm -f ${ALPHARD_CONTAINER_NAME}
-
-# No flock here.
+ExecStartPre=/bin/sh -c '/usr/bin/docker ps -aq --filter name=^/${ALPHARD_CONTAINER_NAME}$ | grep -q . && /usr/bin/docker rm -f ${ALPHARD_CONTAINER_NAME} || true'
 ExecStart=/opt/alphard/bin/alphard-run-once.sh
-
-# Always clean up after success, failure, or timeout.
-ExecStopPost=-/usr/bin/docker rm -f ${ALPHARD_CONTAINER_NAME}
+ExecStopPost=/bin/sh -c '/usr/bin/docker ps -aq --filter name=^/${ALPHARD_CONTAINER_NAME}$ | grep -q . && /usr/bin/docker rm -f ${ALPHARD_CONTAINER_NAME} || true'
