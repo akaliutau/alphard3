@@ -215,6 +215,7 @@ marimo/_lsp/
 __marimo__/
 
 # Streamlit
+aggregated_dump.txt
 .streamlit/secrets.toml
 .idea
 notes.txt

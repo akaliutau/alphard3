@@ -112,6 +112,7 @@ class Strategy:
                             decision.stop_loss, decision.take_profit, decision.entry_price)
         except Exception as exc:
             logger.exception("%s uid=%s LLM analysis failed: %s", self.symbol.name, uid, exc)
+            #decision = Decision(status="ERROR", error=str(exc), raw_text=raw)
             decision = Decision(status="ERROR", error=str(exc), raw_text=raw)
 
         self.ledger.log(
@@ -164,19 +165,19 @@ def parse_strategy_output(text: str) -> Decision:
             order_kind=str(obj.get("order_kind") or "limit").lower(),  # type: ignore[arg-type]
             rationale=str(obj.get("rationale") or obj.get("analysis") or ""),
             levels=obj.get("levels") if isinstance(obj.get("levels"), dict) else {},
-            raw_text=text,
+            raw_text="NA",
         )
 
     # Backward-compatible parser for the old plain text format: BUY 0.5 SL TP\nreason
     lines = [x.strip() for x in clean.splitlines() if x.strip()]
     if not lines:
-        return Decision(status="ERROR", error="empty LLM response", raw_text=text)
+        return Decision(status="ERROR", error="empty LLM response", raw_text="")
     tokens = lines[0].split()
     command = tokens[0].upper()
     if command == "HOLD":
-        return Decision(status="HOLD", rationale=" ".join(lines[1:]), raw_text=text)
+        return Decision(status="HOLD", rationale=" ".join(lines[1:]), raw_text="")
     if command not in {"BUY", "SELL"}:
-        return Decision(status="ERROR", error=f"invalid command {command}", raw_text=text)
+        return Decision(status="ERROR", error=f"invalid command {command}", raw_text="")
     nums = []
     for token in tokens[1:]:
         try:
@@ -184,7 +185,7 @@ def parse_strategy_output(text: str) -> Decision:
         except ValueError:
             pass
     if len(nums) < 3:
-        return Decision(status="ERROR", error="expected allocation, stop_loss, take_profit", raw_text=text)
+        return Decision(status="ERROR", error="expected allocation, stop_loss, take_profit", raw_text="")
     allocation = abs(nums[0]) if command == "BUY" else -abs(nums[0])
     return Decision(
         status=command,  # type: ignore[arg-type]
@@ -193,7 +194,7 @@ def parse_strategy_output(text: str) -> Decision:
         stop_loss=nums[1],
         take_profit=nums[2],
         rationale=" ".join(lines[1:]),
-        raw_text=text,
+        raw_text="",
     )
 
 

@@ -1,0 +1,23 @@
+[Unit]
+Description=Alphard trading cycle container
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+
+# Hard max for one run.
+TimeoutStartSec=14min
+
+# After TimeoutStartSec, send SIGTERM first, then SIGKILL after this grace period.
+TimeoutStopSec=30s
+TimeoutStartFailureMode=terminate
+KillMode=control-group
+SendSIGKILL=yes
+
+# No internal restart; the timer owns cadence.
+Restart=no
+
+ExecStart=/usr/bin/flock -n /run/alphard.lock /opt/alphard/bin/alphard-run-once.sh
+

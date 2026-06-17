@@ -1,0 +1,32 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+
+# Runtime state must live on the VM persistent disk, not in the image.
+data
+img_cache
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets / local env files must not be baked into the image.
+.env
+.env.*
+!*example
+*sa-key*.json
+*service-account*.json
+*.pem
+*.key
+
+# Generated bundles.
+alphard_ops_bundle
+alphard_ops_bundle.zip
