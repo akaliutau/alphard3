@@ -36,19 +36,15 @@ gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-From the Alphard repo root after copying these files in:
-
-```bash
-scripts/gcp/deploy_alphard_vm.sh
-```
-
-To use a hand-maintained environment file instead of generated env:
+Use a hand-maintained environment file for env:
 
 ```bash
 cp .env.cloud.example .env.cloud
 # edit MT5_BASE_URL, MT5_API_KEY, PROJECT_ID, bucket, symbols, DRY_RUN
 export ENV_CLOUD_FILE=$PWD/.env.cloud
 export OVERWRITE_ENV=true
+source scripts/set_env.sh
+scripts/deploy_infra.sh
 scripts/gcp/deploy_alphard_vm.sh
 ```
 

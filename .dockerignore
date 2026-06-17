@@ -12,6 +12,7 @@ __pycache__
 # Runtime state must live on the VM persistent disk, not in the image.
 data
 img_cache
+docs
 *.sqlite
 *.sqlite3
 *.db
@@ -22,10 +23,11 @@ img_cache
 .env
 .env.*
 !*example
-*sa-key*.json
+*-key*.json
 *service-account*.json
 *.pem
 *.key
+aggregated_dump.txt
 
 # Generated bundles.
 alphard_ops_bundle

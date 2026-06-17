@@ -24,6 +24,8 @@ gcloud services enable \
   compute.googleapis.com \
   aiplatform.googleapis.com \
   storage.googleapis.com \
+  artifactregistry.googleapis.com \
+  cloudbuild.googleapis.com \
   iam.googleapis.com
 
 if ! gcloud iam service-accounts describe "${SA_EMAIL}" >/dev/null 2>&1; then
@@ -119,15 +121,4 @@ SQLITE_PATH=/opt/alphard/state/alphard.sqlite3
 DATA_DIR=/opt/alphard/state/data
 IMAGE_CACHE_DIR=/opt/alphard/state/img_cache
 
-Copy code to VM:
-gcloud compute scp --recurse . ${VM_NAME}:/opt/alphard/app --zone=${ZONE}
-
-Run on VM:
-gcloud compute ssh ${VM_NAME} --zone=${ZONE}
-cd /opt/alphard/app
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.cloud.example .env.cloud
-ENV_FILE=.env.cloud python app.py --once
 EOF

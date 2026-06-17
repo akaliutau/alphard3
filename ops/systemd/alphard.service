@@ -1,23 +1,25 @@
 [Unit]
 Description=Alphard trading cycle container
 After=network-online.target docker.service
-Wants=network-online.target
-Requires=docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=/etc/alphard/runner.env
 
-# Hard max for one run.
+# Keep below 15m so the next M15 slot has cleanup margin.
 TimeoutStartSec=14min
-
-# After TimeoutStartSec, send SIGTERM first, then SIGKILL after this grace period.
 TimeoutStopSec=30s
 TimeoutStartFailureMode=terminate
 KillMode=control-group
 SendSIGKILL=yes
-
-# No internal restart; the timer owns cadence.
 Restart=no
 
-ExecStart=/usr/bin/flock -n /run/alphard.lock /opt/alphard/bin/alphard-run-once.sh
+# Recover from any orphaned previous container before starting a new slot.
+ExecStartPre=-/usr/bin/docker rm -f ${ALPHARD_CONTAINER_NAME}
 
+# No flock here.
+ExecStart=/opt/alphard/bin/alphard-run-once.sh
+
+# Always clean up after success, failure, or timeout.
+ExecStopPost=-/usr/bin/docker rm -f ${ALPHARD_CONTAINER_NAME}
