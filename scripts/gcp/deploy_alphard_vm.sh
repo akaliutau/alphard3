@@ -15,14 +15,14 @@ IMAGE_NAME="${IMAGE_NAME:-alphard}"
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
 SERVICE_ACCOUNT_NAME="${SA_NAME:-alphard-trader-sa}"
 STATE_DISK="${STATE_DISK:-alphard-state}"
-STATE_DISK_SIZE="${STATE_DISK_SIZE:-30GB}"
-BOOT_DISK_SIZE="${BOOT_DISK_SIZE:-10GB}"
-RUN_INTERVAL_MINUTES="${RUN_INTERVAL_MINUTES:-15}"
+STATE_DISK_SIZE="${STATE_DISK_SIZE:-50GB}"
+BOOT_DISK_SIZE="${BOOT_DISK_SIZE:-20GB}"
+RUN_INTERVAL_MINUTES="${RUN_INTERVAL_MINUTES:-5}"
 RUN_NOW="${RUN_NOW:-false}"
 OVERWRITE_ENV="${OVERWRITE_ENV:-false}"
 DRY_RUN="${DRY_RUN:-true}"
 SYMBOLS="${SYMBOLS:-EURUSD,USDJPY}"
-MT5_TIMEFRAME="${MT5_TIMEFRAME:-M15}"
+#MT5_TIMEFRAME="${MT5_TIMEFRAME:-M5}"
 GCS_BUCKET_NAME="${GCS_BUCKET_NAME:-charts-${PROJECT_ID}}"
 ENV_CLOUD_FILE="${ENV_CLOUD_FILE:-}"
 ALPHARD_DOCKER_MEMORY="${ALPHARD_DOCKER_MEMORY:-1536m}"
@@ -52,6 +52,7 @@ require_file requirements.txt
 require_file app.py
 require_file ops/bin/alphard-run-once.sh
 require_file ops/systemd/alphard.service
+require_file ops/systemd/alphard-m5.timer
 require_file ops/systemd/alphard-m15.timer
 require_file ops/systemd/alphard-m30.timer
 require_file scripts/gcp/install_alphard_vm.sh
@@ -63,8 +64,10 @@ SA_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 TIMER_MODE="m15"
 if [[ "$RUN_INTERVAL_MINUTES" == "30" ]]; then
   TIMER_MODE="m30"
+elif [[ "$RUN_INTERVAL_MINUTES" == "5" ]]; then
+  TIMER_MODE="m5"
 elif [[ "$RUN_INTERVAL_MINUTES" != "15" ]]; then
-  echo "RUN_INTERVAL_MINUTES must be 15 or 30 for the supplied systemd timers." >&2
+  echo "RUN_INTERVAL_MINUTES must be 5, 15 or 30 for the supplied systemd timers." >&2
   exit 2
 fi
 
@@ -119,6 +122,7 @@ mkdir -p "$TMPDIR/ops/bin" "$TMPDIR/ops/systemd" "$TMPDIR/scripts/gcp" "$TMPDIR/
 
 install -m 0755 ops/bin/alphard-run-once.sh "$TMPDIR/ops/bin/alphard-run-once.sh"
 install -m 0644 ops/systemd/alphard.service "$TMPDIR/ops/systemd/alphard.service"
+install -m 0644 ops/systemd/alphard-m5.timer "$TMPDIR/ops/systemd/alphard-m5.timer"
 install -m 0644 ops/systemd/alphard-m15.timer "$TMPDIR/ops/systemd/alphard-m15.timer"
 install -m 0644 ops/systemd/alphard-m30.timer "$TMPDIR/ops/systemd/alphard-m30.timer"
 install -m 0755 scripts/gcp/install_alphard_vm.sh "$TMPDIR/scripts/gcp/install_alphard_vm.sh"
@@ -131,7 +135,7 @@ ALPHARD_STATE_DIR=/var/lib/alphard
 ALPHARD_CONTAINER_NAME=alphard-run
 ALPHARD_DOCKER_MEMORY=${ALPHARD_DOCKER_MEMORY}
 ALPHARD_DOCKER_CPUS=${ALPHARD_DOCKER_CPUS}
-ALPHARD_DIAGNOSTICS_ONLY=${ALPHARD_DIAGNOSTICS_ONLY:-true}
+ALPHARD_DIAGNOSTICS_ONLY=${ALPHARD_DIAGNOSTICS_ONLY:-false}
 EOF2
 
 cp "$ENV_CLOUD_FILE" "$TMPDIR/etc/alphard/.env.cloud"

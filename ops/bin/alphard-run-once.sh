@@ -46,18 +46,18 @@ print("imports ok")
 PY
       echo "diagnostics complete"
     '
+  exit 0
 fi
 
 exec docker run --rm \
   --name "$ALPHARD_CONTAINER_NAME" \
   --network host \
   --env-file "$ALPHARD_ENV_FILE" \
-  -e ENV_FILE=.env.cloud \
+  -e ENV_FILE=/dev/null \
   -e MPLCONFIGDIR=/tmp/matplotlib \
   --memory "$ALPHARD_DOCKER_MEMORY" \
   --cpus "$ALPHARD_DOCKER_CPUS" \
   --stop-timeout 30 \
-  -v "$ALPHARD_ENV_FILE:/app/.env.cloud:ro" \
   -v "$ALPHARD_STATE_DIR/data:/app/data" \
   -v "$ALPHARD_STATE_DIR/img_cache:/app/img_cache" \
   "$ALPHARD_IMAGE" \

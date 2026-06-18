@@ -20,6 +20,6 @@ export MT5_BASE_URL=http://10.0.0.10:8000
 export MT5_API_KEY=dev-api-key
 
 # Start safe. Switch DRY_RUN=false only after smoke tests.
-export DRY_RUN=true
-export RUN_INTERVAL_MINUTES=15
+export DRY_RUN=false
+export RUN_INTERVAL_MINUTES=5
 export RUN_NOW=true

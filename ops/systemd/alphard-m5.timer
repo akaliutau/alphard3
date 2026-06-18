@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Alphard at +1 minute of each M5 slot
+
+[Timer]
+OnCalendar=*-*-* *:01,6,11,16,21,26,31,36,41,46,51,55:00
+AccuracySec=5s
+Persistent=true
+RandomizedDelaySec=0
+Unit=alphard.service
+
+[Install]
+WantedBy=timers.target

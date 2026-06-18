@@ -13,8 +13,25 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 # ENV_FILE lets you switch without editing code:
 #   ENV_FILE=.env.local python app.py
 #   ENV_FILE=.env.cloud python app.py
-load_dotenv(ROOT_DIR / os.getenv("ENV_FILE", ".env"))
-load_dotenv(ROOT_DIR / ".env", override=False)
+def _load_dotenv_if_readable(path: Path) -> None:
+    if path.exists() and path.is_file() and os.access(path, os.R_OK):
+        load_dotenv(path, override=False)
+
+env_file = os.getenv("ENV_FILE")
+
+# Local/dev mode:
+#   ENV_FILE=.env.local python app.py
+#
+# Cloud/container mode:
+#   Docker injects env vars with --env-file.
+#   Set ENV_FILE=/dev/null or unset it, so Python does not try to read the secret file.
+if env_file and env_file != "/dev/null":
+    env_path = Path(env_file)
+    if not env_path.is_absolute():
+        env_path = ROOT_DIR / env_path
+    _load_dotenv_if_readable(env_path)
+
+_load_dotenv_if_readable(ROOT_DIR / ".env")
 
 # LiteLLM reads this process env var when it is imported lazily by middleware/llm_middleware.py.
 # Keep it quiet by default; turn on with LITELLM_LOG=DEBUG or LITELLM_DEBUG=true in .env.local.

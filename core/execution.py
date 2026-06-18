@@ -67,6 +67,7 @@ class ExecutionEngine:
             else:
                 response = await self.api.place_pending_order(body)
             retcode = response.get("retcode") or (response.get("result") or {}).get("retcode")
+            print(response)
             result = ExecutionResult(attempted=True, dry_run=False, request=body, response=response, ok=True, retcode=retcode)
         except Exception as exc:
             result = ExecutionResult(attempted=True, dry_run=False, request=body, ok=False, error=str(exc))
