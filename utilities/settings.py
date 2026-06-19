@@ -115,7 +115,8 @@ class AppConfig:
     entry_pullback_points: int = _int("ENTRY_PULLBACK_POINTS", 30)  # legacy; no longer used for pending entry placement
     min_stop_distance_points: int = _int("MIN_STOP_DISTANCE_POINTS", 20)
     split_order_enabled: bool = _bool("SPLIT_ORDER_ENABLED", True)
-    symbol_base_volume: dict[str, float] = field(default_factory=lambda: {"EURUSD":1.0,"USDJPY":2.0,"USDCAD":1.0,"EURCHF":1.0,"XAUUSD":0.1,"EURGBP":1.0,"GBPUSD":1.0})
+    symbol_base_volume: dict[str, float] = field(default_factory=lambda:
+    {"EURUSD":10.0,"USDJPY":20.0,"USDCAD":10.0,"EURCHF":10.0,"XAUUSD":1.0,"EURGBP":10.0,"GBPUSD":10.0})
     cancel_stale_pending_orders: bool = _bool("CANCEL_STALE_PENDING_ORDERS", False)
 
 
