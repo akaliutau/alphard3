@@ -40,7 +40,8 @@ class RiskEngine:
         side = decision.side
         assert side is not None
         entry = self._entry_price(decision, tick, symbol_info)
-        sl_adjustment = self._auto_correct_stop_loss(decision, symbol_info, entry)
+
+        adjustments = self._auto_correct_trade_geometry(decision, symbol_info, entry)
 
         price_result = self._check_prices(ctx)
         if price_result is not None:
@@ -48,13 +49,20 @@ class RiskEngine:
         entry_result = self._check_entry_price(decision, tick, symbol_info, entry)
         if entry_result is not None:
             return entry_result
+        reward_risk_result = self._check_reward_risk(decision, entry)
+        if reward_risk_result is not None:
+            return reward_risk_result
 
-        volume = self._volume(decision, symbol_info)
+        volume, sizing = self._volume(decision, symbol_info)
         if volume <= 0:
             return RiskResult(False, "computed volume is zero")
-        adjusted = {"decision": asdict(decision), "tick": tick.raw, "symbol_info": symbol_info.raw}
-        if sl_adjustment:
-            adjusted["sl_adjustment"] = sl_adjustment
+        adjusted = {"decision": asdict(decision), "tick": tick.raw, "symbol_info": symbol_info.raw, "sizing": sizing}
+        if adjustments:
+            adjusted["auto_adjustments"] = adjustments
+            if "stop_loss" in adjustments:
+                adjusted["sl_adjustment"] = adjustments["stop_loss"]
+            if "take_profit" in adjustments:
+                adjusted["tp_adjustment"] = adjustments["take_profit"]
         order_plan = self._order_plan(decision, tick, symbol_info, entry, volume)
         if len(order_plan) > 1:
             adjusted["orders"] = order_plan
@@ -85,6 +93,10 @@ class RiskEngine:
             return RiskResult(False, f"confidence {d.confidence:.2f} < minimum {config.min_confidence:.2f}")
         if abs(d.allocation) <= 0:
             return RiskResult(False, "allocation is zero")
+        if d.status == "BUY" and d.allocation < 0:
+            return RiskResult(False, "BUY allocation must be positive")
+        if d.status == "SELL" and d.allocation > 0:
+            return RiskResult(False, "SELL allocation must be negative")
         return None
 
     def _check_position_cap(self, ctx: dict[str, Any]) -> RiskResult | None:
@@ -141,6 +153,29 @@ class RiskEngine:
 
         return None
 
+    def _check_reward_risk(self, d: Decision, entry: float) -> RiskResult | None:
+        if d.stop_loss is None or d.take_profit is None:
+            return RiskResult(False, "missing stop_loss or take_profit")
+
+        sl = float(d.stop_loss)
+        tp = float(d.take_profit)
+        if d.side == "buy":
+            risk = entry - sl
+            reward = tp - entry
+        elif d.side == "sell":
+            risk = sl - entry
+            reward = entry - tp
+        else:
+            return RiskResult(False, "decision has no side")
+
+        if risk <= 0 or reward <= 0:
+            return RiskResult(False, "invalid reward/risk geometry")
+
+        ratio = reward / risk
+        if ratio < config.min_reward_risk_ratio:
+            return RiskResult(False, f"reward/risk {ratio:.2f} < minimum {config.min_reward_risk_ratio:.2f}")
+        return None
+
     def _pending_limit_gap(self, info: SymbolInfo, multiplier: int = 1) -> float:
         raw_stops_level = info.raw.get("trade_stops_level") or info.raw.get("stops_level") or 0
         try:
@@ -165,32 +200,73 @@ class RiskEngine:
             return round(tick.bid - gap, info.digits)
         return round(tick.ask + gap, info.digits)
 
-    def _auto_correct_stop_loss(self, d: Decision, info: SymbolInfo, entry: float) -> dict[str, Any]:
+    def _auto_correct_trade_geometry(self, d: Decision, info: SymbolInfo, entry: float) -> dict[str, Any]:
+        """Repair deterministic, broker-checkable geometry before rejecting.
+
+        The VLM often gets direction right but places SL/TP a few points too close
+        for the broker or a little short of the configured reward/risk floor.  Those
+        are mechanical issues, so fix them deterministically instead of converting
+        an otherwise tradable signal into a HOLD/reject.
+        """
         if d.side is None or d.stop_loss is None or d.take_profit is None:
             return {}
 
+        adjustments: dict[str, Any] = {}
         min_dist = config.min_stop_distance_points * info.point
-        original = float(d.stop_loss)
-        tp = float(d.take_profit)
-        buffer = max(self._pending_limit_gap(info), info.point)
+        # Add one point of slack so rounding and broker-side comparisons do not
+        # turn an exactly-on-threshold value back into "too close".
+        min_effective = min_dist + max(info.point, self._pending_limit_gap(info) * 0.05)
+        min_rr = max(float(config.min_reward_risk_ratio), 0.0)
+
+        original_sl = float(d.stop_loss)
+        original_tp = float(d.take_profit)
+        sl = original_sl
+        tp = original_tp
 
         if d.side == "buy":
-            if entry - original >= min_dist:
-                return {}
-            level = self._nearest_level(d.levels, below=entry - min_dist, prefer="support")
-            reward = max(tp - entry, min_dist)
-            fallback = entry - max(min_dist, reward * 0.5)
-            corrected = min((level - buffer) if level is not None else fallback, entry - min_dist)
-        else:
-            if original - entry >= min_dist:
-                return {}
-            level = self._nearest_level(d.levels, above=entry + min_dist, prefer="resistance")
-            reward = max(entry - tp, min_dist)
-            fallback = entry + max(min_dist, reward * 0.5)
-            corrected = max((level + buffer) if level is not None else fallback, entry + min_dist)
+            # SL must be below entry by at least the broker/min configured distance.
+            if entry - sl < min_effective:
+                level = self._nearest_level(d.levels, below=entry - min_effective, prefer="support")
+                fallback = entry - min_effective
+                sl = min((level - info.point) if level is not None else fallback, fallback)
 
-        d.stop_loss = round(corrected, info.digits)
-        return {"from": original, "to": d.stop_loss, "entry": entry, "min_distance_points": config.min_stop_distance_points}
+            risk = max(entry - sl, min_effective)
+            min_tp = entry + risk * min_rr + info.point
+            if tp - entry < risk * min_rr:
+                tp = min_tp
+
+        else:
+            # SL must be above entry by at least the broker/min configured distance.
+            if sl - entry < min_effective:
+                level = self._nearest_level(d.levels, above=entry + min_effective, prefer="resistance")
+                fallback = entry + min_effective
+                sl = max((level + info.point) if level is not None else fallback, fallback)
+
+            risk = max(sl - entry, min_effective)
+            max_tp = entry - risk * min_rr - info.point
+            if entry - tp < risk * min_rr:
+                tp = max_tp
+
+        sl = round(sl, info.digits)
+        tp = round(tp, info.digits)
+
+        if sl != original_sl:
+            d.stop_loss = sl
+            adjustments["stop_loss"] = {
+                "from": original_sl,
+                "to": sl,
+                "entry": entry,
+                "min_distance_points": config.min_stop_distance_points,
+            }
+        if tp != original_tp:
+            d.take_profit = tp
+            adjustments["take_profit"] = {
+                "from": original_tp,
+                "to": tp,
+                "entry": entry,
+                "min_reward_risk_ratio": config.min_reward_risk_ratio,
+            }
+        return adjustments
 
     def _nearest_level(
         self,
@@ -244,17 +320,22 @@ class RiskEngine:
         if first_volume < info.volume_min or second_volume < info.volume_min:
             return [base]
 
-        second_entry = self._entry_price_for_gap(d, tick, info, multiplier=2)
+        second_entry = self._entry_price_for_gap(d, tick, info, multiplier=6)
+        min_rr = max(float(config.min_reward_risk_ratio), 0.0)
         if d.side == "buy":
             if not (float(d.stop_loss) < second_entry < float(d.take_profit)):
                 return [base]
-            close_tp = round(entry + (float(d.take_profit) - entry) * 0.5, info.digits)
+            risk = entry - float(d.stop_loss)
+            # The close leg must still satisfy the same reward/risk floor;
+            # otherwise splitting silently creates a low-quality first order.
+            close_tp = round(entry + risk * min_rr, info.digits)
             if not (entry < close_tp < float(d.take_profit)):
                 return [base]
         else:
             if not (float(d.take_profit) < second_entry < float(d.stop_loss)):
                 return [base]
-            close_tp = round(entry - (entry - float(d.take_profit)) * 0.5, info.digits)
+            risk = float(d.stop_loss) - entry
+            close_tp = round(entry - risk * min_rr, info.digits)
             if not (float(d.take_profit) < close_tp < entry):
                 return [base]
 
@@ -263,20 +344,52 @@ class RiskEngine:
             {**base, "entry_price": second_entry, "volume": second_volume},
         ]
 
-    def _volume(self, d: Decision, info: SymbolInfo) -> float:
+    def _volume(self, d: Decision, info: SymbolInfo) -> tuple[float, dict[str, Any]]:
+        min_volume = info.volume_min or 0.0
+        volume_cap = self._symbol_volume_cap(info)
+        allocation_weight = self._allocation_weight(d)
+        confidence_weight = self._confidence_weight(d.confidence)
+
+        # Confidence should be the main size driver, while allocation remains a
+        # soft modifier. This avoids the old behavior where large symbol base
+        # volumes immediately hit MAX_VOLUME and every approved trade used the
+        # same lot size.
+        conviction_weight = confidence_weight * (0.5 + 0.5 * allocation_weight)
+        requested = min_volume + max(volume_cap - min_volume, 0.0) * conviction_weight
+        volume = self._normalize_volume(requested, info)
+        sizing = {
+            "min_volume": min_volume,
+            "volume_cap": volume_cap,
+            "allocation_weight": round(allocation_weight, 4),
+            "confidence_weight": round(confidence_weight, 4),
+            "conviction_weight": round(conviction_weight, 4),
+            "requested_volume": round(requested, 8),
+            "normalized_volume": volume,
+        }
+        return volume, sizing
+
+    def _symbol_volume_cap(self, info: SymbolInfo) -> float:
         name = info.name.upper()
-        print(f"_volume {name}")
-        symbol_base_volume = next(
+        symbol_cap = next(
             (volume for symbol, volume in config.symbol_base_volume.items() if name.startswith(symbol.upper())),
             config.base_volume,
         )
-        print(f"_volume {symbol_base_volume}")
-        requested = symbol_base_volume * min(abs(d.allocation), config.max_allocation)
-        requested = min(requested, config.max_volume)
-        requested = max(requested, info.volume_min)
-        normv = self._normalize_volume(requested, info)
-        print(f"normv {normv}")
-        return normv
+        cap = min(float(symbol_cap), config.max_volume)
+        if info.volume_max is not None:
+            cap = min(cap, info.volume_max)
+        return max(info.volume_min or 0.0, cap)
+
+    def _allocation_weight(self, d: Decision) -> float:
+        if config.max_allocation <= 0:
+            return 0.0
+        return self._clamp(abs(float(d.allocation)) / config.max_allocation, 0.0, 1.0)
+
+    def _confidence_weight(self, confidence: float) -> float:
+        denominator = max(1.0 - config.min_confidence, 1e-9)
+        return self._clamp((float(confidence) - config.min_confidence) / denominator, 0.0, 1.0)
+
+    def _clamp(self, value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, value))
 
     def _normalize_volume(self, requested: float, info: SymbolInfo, enforce_min: bool = True) -> float:
         if info.volume_max is not None:

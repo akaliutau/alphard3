@@ -134,7 +134,14 @@ class AlphardApp:
         )
         logger.info("%s uid=%s risk approved=%s reason=%s", symbol.name, target_uid, risk.approved, risk.reason)
 
-        cleanup = await self.exec.cleanup_pending_orders(symbol.name) if risk.approved else []
+        cleanup = []
+        if risk.approved:
+            try:
+                cleanup = await self.exec.cleanup_pending_orders(symbol.name)
+            except Exception as exc:
+                # Cleanup must never prevent an already-approved trade from reaching MT5.
+                logger.exception("%s uid=%s pending order cleanup failed; continuing to execution", symbol.name, target_uid)
+                cleanup = [{"stage": "cleanup_pending_orders", "ok": False, "error": str(exc)}]
         if cleanup:
             self.ledger.log(
                 EventType.TRADE,

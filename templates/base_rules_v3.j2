@@ -75,10 +75,12 @@ Rules:
 - BUY allocation must be positive.
 - SELL allocation must be negative.
 - HOLD allocation must be 0.
-- confidence must be 0.0 to 1.0.
+- confidence must be 0.0 to 1.0 and is used by deterministic sizing: low approved confidence = small volume, high confidence = larger volume.
+- Keep allocation magnitude aligned with confidence; 0.55-0.65 small, 0.65-0.80 medium, 0.80+ high conviction.
 - For BUY: stop_loss must be below current/entry price and take_profit above it.
 - For SELL: stop_loss must be above current/entry price and take_profit below it.
 - Use null for entry_price, stop_loss, and take_profit on HOLD.
 - Include visible support/resistance levels in levels.
 - Avoid stops/targets that are too close; use second-tier levels if nearest levels are too tight.
+- Prefer setups with reward/risk above 1.05; otherwise HOLD.
 - Rationale must mention the main visual reason, not generic strategy text.

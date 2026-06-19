@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict
 from typing import Any
 
@@ -14,14 +15,50 @@ class ExecutionEngine:
         self.api = api
         self.ledger = ledger
 
+    def _spread_adjusted_tp(
+               self,
+               side: str | None,
+               entry: float,
+               take_profit: float | None,
+               tick: Tick,
+               info: SymbolInfo,
+       ) -> float | None:
+       if take_profit is None:
+            return None
+
+       spread_gap = max(tick.ask - tick.bid, 0.0) + 2 * self._tick_size(info)
+
+       if side == "buy":
+               adjusted = max(entry + self._tick_size(info), float(take_profit) - spread_gap)
+               return self._align_price(adjusted, info, direction="down")
+
+       adjusted = min(entry - self._tick_size(info), float(take_profit) + spread_gap)
+
+       return self._align_price(adjusted, info, direction="up")
+
     async def cleanup_pending_orders(self, symbol: str) -> list[dict[str, Any]]:
         if not config.cancel_stale_pending_orders:
             return []
+
+        try:
+            orders = await self.api.orders(symbol=symbol)
+        except Exception as exc:
+            logger.exception("%s pending order cleanup: could not list orders; continuing to execution", symbol)
+            return [{"stage": "list_orders", "ok": False, "error": str(exc)}]
+
         removed = []
-        for order in await self.api.orders(symbol=symbol):
-            if order.get("magic") == config.mt5_magic or str(order.get("comment", "")).startswith(config.app_name):
-                ticket = int(order["ticket"])
-                removed.append(await self.api.cancel_order(ticket, comment=f"{config.app_name}-cleanup"))
+        for order in orders:
+            if not (order.get("magic") == config.mt5_magic or str(order.get("comment", "")).startswith(config.app_name)):
+                continue
+            ticket = int(order["ticket"])
+            try:
+                response = await self.api.cancel_order(ticket)
+                removed.append({"ticket": ticket, "ok": True, "response": response})
+            except Exception as exc:
+                logger.exception("%s pending order cleanup: cancel failed ticket=%s; continuing to execution", symbol, ticket)
+                removed.append({"ticket": ticket, "ok": False, "error": str(exc)})
+        if removed:
+            logger.info("%s pending order cleanup results=%s", symbol, removed)
         return removed
 
     async def execute(
@@ -40,25 +77,48 @@ class ExecutionEngine:
             return result
 
         assert decision.side is not None
-        bodies = self._request_bodies(symbol, decision, risk, tick, info)
-        request_payload = {"orders": bodies} if len(bodies) > 1 else bodies[0]
+        exec_tick = tick
+        exec_info = info
+        if config.execution_mode == "pending_limit" and not config.dry_run:
+            try:
+                exec_tick, exec_info = await self.api.tick(symbol)
+                logger.info(
+                    "%s uid=%s refreshed tick before pending order bid=%s ask=%s",
+                    symbol,
+                    uid,
+                    exec_tick.bid,
+                    exec_tick.ask,
+                )
+            except Exception:
+                # Fall back to the analysis-time tick, but make the risk visible.
+                logger.exception("%s uid=%s could not refresh tick before pending order; using analysis tick", symbol, uid)
+        try:
+            bodies = self._request_bodies(symbol, decision, risk, exec_tick, exec_info)
+            request_payload = {"orders": bodies} if len(bodies) > 1 else bodies[0]
+        except Exception as exc:
+            logger.exception("%s uid=%s failed to build MT5 request", symbol, uid)
+            result = ExecutionResult(attempted=False, dry_run=config.dry_run, error=f"failed to build MT5 request: {exc}")
+            self._log(symbol, uid, strategy, result)
+            return result
 
         if config.dry_run:
             result = ExecutionResult(attempted=True, dry_run=True, request=request_payload, ok=True)
             self._log(symbol, uid, strategy, result)
-            logger.info("DRY_RUN: would execute %s", request_payload)
+            logger.info("DRY_RUN: would execute %s uid=%s request=%s", symbol, uid, request_payload)
             return result
 
         responses = []
+        logger.info("%s uid=%s MT5 execution start mode=%s orders=%s", symbol, uid, config.execution_mode, len(bodies))
         try:
-            for body in bodies:
+            for index, body in enumerate(bodies, start=1):
+                logger.info("%s uid=%s MT5 request %s/%s body=%s", symbol, uid, index, len(bodies), body)
                 if config.execution_mode == "market":
                     response = await self.api.open_deal(body)
                 else:
                     response = await self.api.place_pending_order(body)
+                logger.info("%s uid=%s MT5 response %s/%s response=%s", symbol, uid, index, len(bodies), response)
                 responses.append(response)
             first_response = responses[0] if responses else {}
-            print(first_response)
             retcode = first_response.get("retcode") or (first_response.get("result") or {}).get("retcode")
             result = ExecutionResult(
                 attempted=True,
@@ -69,6 +129,7 @@ class ExecutionEngine:
                 retcode=retcode,
             )
         except Exception as exc:
+            logger.exception("%s uid=%s MT5 execution failed after %s/%s responses", symbol, uid, len(responses), len(bodies))
             result = ExecutionResult(
                 attempted=True,
                 dry_run=False,
@@ -79,6 +140,15 @@ class ExecutionEngine:
             )
 
         self._log(symbol, uid, strategy, result)
+        logger.info(
+            "%s uid=%s trade result attempted=%s ok=%s retcode=%s error=%s",
+            symbol,
+            uid,
+            result.attempted,
+            result.ok,
+            result.retcode,
+            result.error,
+        )
         return result
 
     def _request_bodies(
@@ -103,22 +173,107 @@ class ExecutionEngine:
             ]
 
         bodies = []
-        for plan in plans:
+        for index, plan in enumerate(plans, start=1):
+            sl = round(float(plan["stop_loss"]), info.digits) if plan.get("stop_loss") is not None else None
+            tp = round(float(plan["take_profit"]), info.digits) if plan.get("take_profit") is not None else None
+            price = round(float(plan["entry_price"]), info.digits) if plan.get("entry_price") is not None else None
+
+            if config.execution_mode == "pending_limit":
+                # Re-price just-in-time from the fresh tick. The LLM/risk tick can
+                # be several seconds old, and a stale sell/buy limit price easily
+                # becomes MT5 retcode 10015 Invalid price.
+                price = self._pending_limit_price(decision.side, tick, info, multiplier=(6 if index > 1 else 1))
+                sl, tp = self._repair_protection(decision.side, price, sl, tp, info)
+                tp = self._spread_adjusted_tp(decision.side, price, tp, tick, info)
+
             body = {
                 "symbol": symbol,
                 "side": decision.side,
                 "volume": float(plan.get("volume", risk.volume)),
-                "sl": round(float(plan["stop_loss"]), info.digits) if plan.get("stop_loss") is not None else None,
-                "tp": round(float(plan["take_profit"]), info.digits) if plan.get("take_profit") is not None else None,
+                "sl": sl,
+                "tp": tp,
                 "deviation": config.mt5_deviation,
                 "magic": config.mt5_magic,
-                #"comment": f"{config.app_name}-{strategy}-{uid}",
                 "type_filling": config.mt5_type_filling,
             }
+            # Intentionally do not send a comment field. Some brokers reject
+            # non-empty comments, and the upstream MT5 proxy may add its own
+            # default comment if that proxy is not patched separately.
             if config.execution_mode == "pending_limit":
-                body.update({"order_kind": "limit", "price": round(float(plan["entry_price"]), info.digits)})
+                body.update({"order_kind": "limit", "price": price})
             bodies.append(body)
         return bodies
+
+    def _pending_limit_price(self, side: str | None, tick: Tick, info: SymbolInfo, multiplier: int = 1) -> float:
+        gap = self._pending_limit_gap(info, multiplier=multiplier)
+        if side == "buy":
+            return self._align_price(tick.bid - gap, info, direction="down")
+        return self._align_price(tick.ask + gap, info, direction="up")
+
+    def _pending_limit_gap(self, info: SymbolInfo, multiplier: int = 1) -> float:
+        raw_stops_level = info.raw.get("trade_stops_level") or info.raw.get("stops_level") or 0
+        try:
+            broker_stop_points = int(raw_stops_level)
+        except Exception:
+            broker_stop_points = 0
+        # Use at least two points beyond the broker stop level to avoid exact
+        # boundary comparisons on fast-moving symbols like XAUUSD.
+        noise_points = max(0, min(int(config.entry_noise_points), 10))
+        points = max(noise_points * max(1, multiplier), broker_stop_points + 2, 2)
+        return points * info.point
+
+    def _repair_protection(
+        self,
+        side: str | None,
+        entry: float,
+        stop_loss: float | None,
+        take_profit: float | None,
+        info: SymbolInfo,
+    ) -> tuple[float | None, float | None]:
+        if stop_loss is None or take_profit is None:
+            return stop_loss, take_profit
+
+        min_dist = config.min_stop_distance_points * info.point + self._tick_size(info)
+        min_rr = max(float(config.min_reward_risk_ratio), 0.0)
+        sl = float(stop_loss)
+        tp = float(take_profit)
+
+        if side == "buy":
+            if entry - sl < min_dist:
+                sl = entry - min_dist
+            risk = max(entry - sl, min_dist)
+            if tp - entry < risk * min_rr:
+                tp = entry + risk * min_rr + self._tick_size(info)
+            sl = self._align_price(sl, info, direction="down")
+            tp = self._align_price(tp, info, direction="up")
+        else:
+            if sl - entry < min_dist:
+                sl = entry + min_dist
+            risk = max(sl - entry, min_dist)
+            if entry - tp < risk * min_rr:
+                tp = entry - risk * min_rr - self._tick_size(info)
+            sl = self._align_price(sl, info, direction="up")
+            tp = self._align_price(tp, info, direction="down")
+
+        return sl, tp
+
+    def _align_price(self, price: float, info: SymbolInfo, *, direction: str) -> float:
+        tick_size = self._tick_size(info)
+        if direction == "up":
+            steps = math.ceil((price - 1e-12) / tick_size)
+        elif direction == "down":
+            steps = math.floor((price + 1e-12) / tick_size)
+        else:
+            steps = round(price / tick_size)
+        return round(steps * tick_size, info.digits)
+
+    def _tick_size(self, info: SymbolInfo) -> float:
+        raw = info.raw.get("trade_tick_size") or info.raw.get("tick_size") or info.point
+        try:
+            tick_size = float(raw)
+        except Exception:
+            tick_size = info.point
+        return tick_size if tick_size > 0 else info.point
 
     def _log(self, symbol: str, uid: int, strategy: str, result: ExecutionResult) -> None:
         self.ledger.log(EventType.TRADE, symbol=symbol, uid=uid, strategy=strategy, timeframe=config.timeframe, data=asdict(result))

@@ -140,22 +140,22 @@ class MT5Client:
         return list(data.get("orders") or [])
 
     async def open_deal(self, body: dict[str, Any]) -> dict[str, Any]:
-        data = await self._request("POST", "/v1/deals/open", json=_drop_none(body))
+        data = await self._request("POST", "/v1/deals/open", json=_trade_payload(body))
         _assert_trade_ok(data, "open_deal")
         return data
 
     async def close_deal(self, body: dict[str, Any]) -> dict[str, Any]:
-        data = await self._request("POST", "/v1/deals/close", json=_drop_none(body))
+        data = await self._request("POST", "/v1/deals/close", json=_trade_payload(body))
         _assert_trade_ok(data, "close_deal")
         return data
 
     async def place_pending_order(self, body: dict[str, Any]) -> dict[str, Any]:
-        data = await self._request("POST", "/v1/orders/pending", json=_drop_none(body))
+        data = await self._request("POST", "/v1/orders/pending", json=_trade_payload(body))
         _assert_trade_ok(data, "place_pending_order")
         return data
 
     async def modify_order(self, ticket: int, body: dict[str, Any]) -> dict[str, Any]:
-        data = await self._request("POST", f"/v1/orders/{ticket}/modify", json=_drop_none(body))
+        data = await self._request("POST", f"/v1/orders/{ticket}/modify", json=_trade_payload(body))
         _assert_trade_ok(data, "modify_order")
         return data
 
@@ -163,6 +163,14 @@ class MT5Client:
         data = await self._request("DELETE", f"/v1/orders/{ticket}")
         _assert_trade_ok(data, "cancel_order")
         return data
+
+
+def _trade_payload(data: dict[str, Any]) -> dict[str, Any]:
+    # A few brokers reject non-empty MT5 order comments.  Keep comments out of
+    # all app-originated trade payloads even if a caller accidentally adds one.
+    clean = dict(data)
+    clean.pop("comment", None)
+    return _drop_none(clean)
 
 
 def _drop_none(data: dict[str, Any]) -> dict[str, Any]:
