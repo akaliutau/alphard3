@@ -106,7 +106,7 @@ class AppConfig:
     execution_mode: Literal["pending_limit", "market"] = os.getenv("EXECUTION_MODE", "pending_limit")  # type: ignore[assignment]
     base_volume: float = _float("BASE_VOLUME", 0.01)
     max_volume: float = _float("MAX_VOLUME", 1.00)
-    min_confidence: float = _float("MIN_CONFIDENCE", 0.55)
+    min_confidence: float = _float("MIN_CONFIDENCE", 0.60)
     max_allocation: float = _float("MAX_ALLOCATION", 1.00)
     max_active_positions: int = _int("MAX_ACTIVE_POSITIONS", 1)
     # Pending entry is intentionally placed very close to the current quote so M1 noise can fill it.
@@ -115,7 +115,7 @@ class AppConfig:
     entry_pullback_points: int = _int("ENTRY_PULLBACK_POINTS", 30)  # legacy; no longer used for pending entry placement
     min_stop_distance_points: int = _int("MIN_STOP_DISTANCE_POINTS", 20)
     split_order_enabled: bool = _bool("SPLIT_ORDER_ENABLED", True)
-    symbol_base_volume: dict[str, float] = field(default_factory=lambda: {"EURUSD":1.0,"USDJPY":2.0,"USDCAD":1.0,"XAUUSD":0.1,"EURGBP":1.0,"GBPUSD":1.0})
+    symbol_base_volume: dict[str, float] = field(default_factory=lambda: {"EURUSD":1.0,"USDJPY":2.0,"USDCAD":1.0,"EURCHF":1.0,"XAUUSD":0.1,"EURGBP":1.0,"GBPUSD":1.0})
     cancel_stale_pending_orders: bool = _bool("CANCEL_STALE_PENDING_ORDERS", False)
 
 

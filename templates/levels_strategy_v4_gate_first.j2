@@ -1,0 +1,57 @@
+{% extends "base_rules_v4_gate_first.j2" %}
+
+{% block analysis_guidelines %}
+Use horizontal levels as decision zones, not automatic entry points.
+
+# STRATEGY MODE SELECTION
+Choose exactly one mode internally:
+A. TREND PULLBACK
+B. BREAKOUT RETEST
+C. LIQUIDITY SWEEP REVERSAL
+D. HOLD / NO EDGE
+
+Only A, B, or C may produce BUY/SELL. D must return HOLD.
+
+# A. TREND PULLBACK
+Trade only with 5m/15m bias.
+BUY requirements:
+- 5m/15m bullish or making higher lows.
+- 1m pulls back to visible support, prior breakout level, or 30-50% impulse retrace.
+- Bullish rejection candle closes back above the level.
+- TP has at least 1.8R room before next resistance.
+SELL requirements are the inverse.
+Do not trade trend pullbacks in flat/choppy higher-timeframe context.
+
+# B. BREAKOUT RETEST
+Do not trade the first break. Wait for the retest.
+BUY requirements:
+- Clear candle close above resistance, preferably more than one close or one strong close plus no failed-break wick.
+- Retest holds the broken resistance as support.
+- Entry is near retest, not far above it.
+- Next resistance allows at least 1.8R after costs.
+SELL requirements are the inverse.
+If price breaks and immediately returns inside the old range, return HOLD.
+
+# C. LIQUIDITY SWEEP REVERSAL
+Use only at visible range extremes or higher-timeframe levels.
+BUY requirements:
+- Price sweeps below support, rejects, and closes back above support.
+- The sweep candle or next candle shows decisive reclaim, not tiny chop.
+- Stop can sit beyond the sweep extreme with enough TP room to midrange/next resistance.
+SELL requirements are the inverse.
+Do not use sweep reversal in the middle of the range.
+
+# LEVEL CROWDING FILTER
+If two or more important levels are within the expected stop/target distance, return HOLD.
+On USDJPY 1m, tiny gaps such as 0.005-0.015 often represent noise unless ATR/spread proves otherwise.
+
+# FALSE-BREAK FILTER
+After a failed breakout/sweep, do not immediately flip direction unless:
+- price closes back through the level decisively,
+- retests from the other side,
+- and there is at least 1.8R to target.
+Otherwise HOLD.
+
+# EXAMPLE BEHAVIOR
+If current price is trapped between nearby support and resistance after a sharp candle, with overlapping candles and no clean retest, return HOLD.
+{% endblock %}
