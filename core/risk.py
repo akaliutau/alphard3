@@ -192,6 +192,9 @@ class RiskEngine:
         if config.execution_mode == "market":
             return round(tick.ask if d.side == "buy" else tick.bid, info.digits)
 
+        if self._uses_pullback_ratio_entry() and d.stop_loss is not None:
+            return self._entry_price_for_pullback(d, tick, info, split_leg=1)
+
         return self._entry_price_for_gap(d, tick, info, multiplier=1)
 
     def _entry_price_for_gap(self, d: Decision, tick: Tick, info: SymbolInfo, multiplier: int = 1) -> float:
@@ -199,6 +202,41 @@ class RiskEngine:
         if d.side == "buy":
             return round(tick.bid - gap, info.digits)
         return round(tick.ask + gap, info.digits)
+
+    def _entry_price_for_pullback(self, d: Decision, tick: Tick, info: SymbolInfo, split_leg: int = 1) -> float:
+        if d.stop_loss is None:
+            return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
+
+        ratio = self._pullback_ratio(split_leg)
+        min_gap = self._pending_limit_gap(info, multiplier=max(1, split_leg))
+        sl = float(d.stop_loss)
+
+        if d.side == "buy":
+            ref = tick.bid
+            if sl >= ref:
+                return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
+            entry = ref - (ref - sl) * ratio
+            entry = min(entry, ref - min_gap)
+            entry = max(entry, sl + info.point)
+        else:
+            ref = tick.ask
+            if sl <= ref:
+                return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
+            entry = ref + (sl - ref) * ratio
+            entry = max(entry, ref + min_gap)
+            entry = min(entry, sl - info.point)
+
+        return round(entry, info.digits)
+
+    def _pullback_ratio(self, split_leg: int = 1) -> float:
+        base = self._clamp(float(config.pullback_ratio), 0.05, 0.95)
+        if split_leg <= 1:
+            return base
+        # Put the second split order deeper toward SL so the two entries are not clustered.
+        return self._clamp(base + (1.0 - base) * 0.5, base, 0.95)
+
+    def _uses_pullback_ratio_entry(self) -> bool:
+        return config.strategy_name in {"pullback_ratio_strategy", "levels_pullback_ratio_strategy"}
 
     def _auto_correct_trade_geometry(self, d: Decision, info: SymbolInfo, entry: float) -> dict[str, Any]:
         """Repair deterministic, broker-checkable geometry before rejecting.
@@ -320,7 +358,10 @@ class RiskEngine:
         if first_volume < info.volume_min or second_volume < info.volume_min:
             return [base]
 
-        second_entry = self._entry_price_for_gap(d, tick, info, multiplier=6)
+        if self._uses_pullback_ratio_entry() and d.stop_loss is not None:
+            second_entry = self._entry_price_for_pullback(d, tick, info, split_leg=2)
+        else:
+            second_entry = self._entry_price_for_gap(d, tick, info, multiplier=config.split_second_entry_multiplier)
         min_rr = max(float(config.min_reward_risk_ratio), 0.0)
         if d.side == "buy":
             if not (float(d.stop_loss) < second_entry < float(d.take_profit)):

@@ -15,27 +15,6 @@ class ExecutionEngine:
         self.api = api
         self.ledger = ledger
 
-    def _spread_adjusted_tp(
-               self,
-               side: str | None,
-               entry: float,
-               take_profit: float | None,
-               tick: Tick,
-               info: SymbolInfo,
-       ) -> float | None:
-       if take_profit is None:
-            return None
-
-       spread_gap = max(tick.ask - tick.bid, 0.0) + 2 * self._tick_size(info)
-
-       if side == "buy":
-               adjusted = max(entry + self._tick_size(info), float(take_profit) - spread_gap)
-               return self._align_price(adjusted, info, direction="down")
-
-       adjusted = min(entry - self._tick_size(info), float(take_profit) + spread_gap)
-
-       return self._align_price(adjusted, info, direction="up")
-
     async def cleanup_pending_orders(self, symbol: str) -> list[dict[str, Any]]:
         if not config.cancel_stale_pending_orders:
             return []
@@ -182,7 +161,15 @@ class ExecutionEngine:
                 # Re-price just-in-time from the fresh tick. The LLM/risk tick can
                 # be several seconds old, and a stale sell/buy limit price easily
                 # becomes MT5 retcode 10015 Invalid price.
-                price = self._pending_limit_price(decision.side, tick, info, multiplier=(6 if index > 1 else 1))
+                multiplier = config.split_second_entry_multiplier if index > 1 else 1
+                price = self._pending_limit_price(
+                    decision.side,
+                    tick,
+                    info,
+                    multiplier=multiplier,
+                    stop_loss=sl,
+                    split_leg=index,
+                )
                 sl, tp = self._repair_protection(decision.side, price, sl, tp, info)
                 tp = self._spread_adjusted_tp(decision.side, price, tp, tick, info)
 
@@ -204,11 +191,64 @@ class ExecutionEngine:
             bodies.append(body)
         return bodies
 
-    def _pending_limit_price(self, side: str | None, tick: Tick, info: SymbolInfo, multiplier: int = 1) -> float:
+    def _pending_limit_price(
+        self,
+        side: str | None,
+        tick: Tick,
+        info: SymbolInfo,
+        multiplier: int = 1,
+        stop_loss: float | None = None,
+        split_leg: int = 1,
+    ) -> float:
+        if self._uses_pullback_ratio_entry() and stop_loss is not None:
+            price = self._pullback_limit_price(side, tick, info, float(stop_loss), split_leg=split_leg)
+            if price is not None:
+                return price
+
         gap = self._pending_limit_gap(info, multiplier=multiplier)
         if side == "buy":
             return self._align_price(tick.bid - gap, info, direction="down")
         return self._align_price(tick.ask + gap, info, direction="up")
+
+    def _pullback_limit_price(
+        self,
+        side: str | None,
+        tick: Tick,
+        info: SymbolInfo,
+        stop_loss: float,
+        split_leg: int = 1,
+    ) -> float | None:
+        ratio = self._pullback_ratio(split_leg)
+        min_gap = self._pending_limit_gap(info, multiplier=max(1, split_leg))
+
+        if side == "buy":
+            ref = tick.bid
+            if stop_loss >= ref:
+                return None
+            entry = ref - (ref - stop_loss) * ratio
+            entry = min(entry, ref - min_gap)
+            entry = max(entry, stop_loss + self._tick_size(info))
+            return self._align_price(entry, info, direction="down")
+
+        if side == "sell":
+            ref = tick.ask
+            if stop_loss <= ref:
+                return None
+            entry = ref + (stop_loss - ref) * ratio
+            entry = max(entry, ref + min_gap)
+            entry = min(entry, stop_loss - self._tick_size(info))
+            return self._align_price(entry, info, direction="up")
+
+        return None
+
+    def _pullback_ratio(self, split_leg: int = 1) -> float:
+        base = self._clamp(float(config.pullback_ratio), 0.05, 0.95)
+        if split_leg <= 1:
+            return base
+        return self._clamp(base + (1.0 - base) * 0.5, base, 0.95)
+
+    def _uses_pullback_ratio_entry(self) -> bool:
+        return config.strategy_name in {"pullback_ratio_strategy", "levels_pullback_ratio_strategy"}
 
     def _pending_limit_gap(self, info: SymbolInfo, multiplier: int = 1) -> float:
         raw_stops_level = info.raw.get("trade_stops_level") or info.raw.get("stops_level") or 0
@@ -256,6 +296,28 @@ class ExecutionEngine:
             tp = self._align_price(tp, info, direction="down")
 
         return sl, tp
+
+    def _spread_adjusted_tp(
+        self,
+        side: str | None,
+        entry: float,
+        take_profit: float | None,
+        tick: Tick,
+        info: SymbolInfo,
+    ) -> float | None:
+        if take_profit is None:
+            return None
+
+        spread_gap = max(tick.ask - tick.bid, 0.0) + 2 * self._tick_size(info)
+        if side == "buy":
+            adjusted = max(entry + self._tick_size(info), float(take_profit) - spread_gap)
+            return self._align_price(adjusted, info, direction="down")
+
+        adjusted = min(entry - self._tick_size(info), float(take_profit) + spread_gap)
+        return self._align_price(adjusted, info, direction="up")
+
+    def _clamp(self, value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, value))
 
     def _align_price(self, price: float, info: SymbolInfo, *, direction: str) -> float:
         tick_size = self._tick_size(info)

@@ -1,0 +1,9 @@
+{% extends "base_rules_v3.j2" %}
+
+{% block analysis_guidelines %}
+Focus on clean level-based setups, but do not optimize entry price.
+Your job is to choose direction plus robust stop_loss and take_profit levels only.
+The deterministic execution layer will ignore entry_price and place a pending limit at a 60% pullback from current price toward your stop_loss.
+Use wider, realistic SL/TP levels so the pullback entry remains between current price and stop_loss with enough reward/risk.
+HOLD if the stop/target geometry is unclear or the next meaningful level is too close.
+{% endblock %}

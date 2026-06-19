@@ -119,6 +119,9 @@ class AlphardApp:
 
         positions = await self.mt5.positions(symbol=symbol.name)
         orders = await self.mt5.orders(symbol=symbol.name)
+        if len(positions) >= config.max_active_positions:
+            logger.info("%s has max open positions =%s, skipping", symbol.name, config.max_active_positions)
+            return
 
         strategy = Strategy(config.strategy_name, symbol, self.model_conf, self.ledger)
         decision = await strategy.analyze(uid=target_uid, candles=candles, positions=positions)

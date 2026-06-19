@@ -229,3 +229,77 @@ def test_execution_reprices_pending_order_from_fresh_tick_and_omits_comment(tmp_
     assert api.sent
     assert api.sent[0]["price"] > 4159.20
     assert "comment" not in api.sent[0]
+
+
+def test_pullback_ratio_strategy_calculates_entry_from_llm_stop_loss():
+    from utilities.settings import config
+
+    old_strategy = config.strategy_name
+    old_pullback_ratio = config.pullback_ratio
+    object.__setattr__(config, "strategy_name", "pullback_ratio_strategy")
+    object.__setattr__(config, "pullback_ratio", 0.60)
+    try:
+        d = Decision(status="BUY", allocation=0.5, confidence=0.9, stop_loss=1.09900, take_profit=1.10200)
+        tick = Tick(bid=1.10000, ask=1.10002)
+        info = SymbolInfo(name="EURUSD", digits=5, point=0.00001, volume_min=0.01, volume_step=0.01)
+
+        r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
+    finally:
+        object.__setattr__(config, "strategy_name", old_strategy)
+        object.__setattr__(config, "pullback_ratio", old_pullback_ratio)
+
+    assert r.approved
+    assert r.entry_price == 1.09940
+    assert d.stop_loss < r.entry_price < d.take_profit
+
+
+def test_pullback_ratio_execution_reprices_from_fresh_tick_and_sl(tmp_path):
+    import asyncio
+    from core.execution import ExecutionEngine
+    from core.ledger import Ledger
+    from core.models import RiskResult
+    from utilities.settings import config
+
+    class Api:
+        def __init__(self):
+            self.sent = []
+
+        async def tick(self, symbol):
+            return (
+                Tick(bid=1.10000, ask=1.10002),
+                SymbolInfo(name=symbol, digits=5, point=0.00001, volume_min=0.01, volume_step=0.01, raw={"trade_tick_size": 0.00001}),
+            )
+
+        async def place_pending_order(self, body):
+            self.sent.append(dict(body))
+            return {"ok": True, "retcode": 10008, "result": {"retcode": 10008}}
+
+    old_dry_run = config.dry_run
+    old_execution_mode = config.execution_mode
+    old_timeframe = config.timeframe
+    old_strategy = config.strategy_name
+    old_pullback_ratio = config.pullback_ratio
+    object.__setattr__(config, "dry_run", False)
+    object.__setattr__(config, "execution_mode", "pending_limit")
+    object.__setattr__(config, "timeframe", "M1")
+    object.__setattr__(config, "strategy_name", "pullback_ratio_strategy")
+    object.__setattr__(config, "pullback_ratio", 0.60)
+    try:
+        api = Api()
+        engine = ExecutionEngine(api, Ledger(tmp_path / "pullback_exec.sqlite3"))
+        decision = Decision(status="BUY", allocation=0.5, confidence=0.9, stop_loss=1.09900, take_profit=1.10200)
+        risk = RiskResult(approved=True, reason="approved", volume=0.1, entry_price=1.09940)
+        stale_tick = Tick(bid=1.10050, ask=1.10052)
+        stale_info = SymbolInfo(name="EURUSD", digits=5, point=0.00001, volume_min=0.01, volume_step=0.01)
+        result = asyncio.run(engine.execute("EURUSD", 202606191646, "pullback_ratio_strategy", decision, risk, stale_tick, stale_info))
+    finally:
+        object.__setattr__(config, "dry_run", old_dry_run)
+        object.__setattr__(config, "execution_mode", old_execution_mode)
+        object.__setattr__(config, "timeframe", old_timeframe)
+        object.__setattr__(config, "strategy_name", old_strategy)
+        object.__setattr__(config, "pullback_ratio", old_pullback_ratio)
+
+    assert result.ok
+    assert api.sent
+    assert api.sent[0]["price"] == 1.09940
+    assert api.sent[0]["sl"] < api.sent[0]["price"] < api.sent[0]["tp"]
