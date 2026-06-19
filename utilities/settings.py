@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -105,13 +105,18 @@ class AppConfig:
 
     execution_mode: Literal["pending_limit", "market"] = os.getenv("EXECUTION_MODE", "pending_limit")  # type: ignore[assignment]
     base_volume: float = _float("BASE_VOLUME", 0.01)
-    max_volume: float = _float("MAX_VOLUME", 0.05)
+    max_volume: float = _float("MAX_VOLUME", 1.00)
     min_confidence: float = _float("MIN_CONFIDENCE", 0.55)
-    max_allocation: float = _float("MAX_ALLOCATION", 0.50)
+    max_allocation: float = _float("MAX_ALLOCATION", 1.00)
     max_active_positions: int = _int("MAX_ACTIVE_POSITIONS", 1)
-    entry_pullback_points: int = _int("ENTRY_PULLBACK_POINTS", 30)
+    # Pending entry is intentionally placed very close to the current quote so M1 noise can fill it.
+    # Broker stops_level can still force a wider gap.
+    entry_noise_points: int = max(0, min(_int("ENTRY_NOISE_POINTS", 5), 10))
+    entry_pullback_points: int = _int("ENTRY_PULLBACK_POINTS", 30)  # legacy; no longer used for pending entry placement
     min_stop_distance_points: int = _int("MIN_STOP_DISTANCE_POINTS", 20)
-    cancel_stale_pending_orders: bool = _bool("CANCEL_STALE_PENDING_ORDERS", True)
+    split_order_enabled: bool = _bool("SPLIT_ORDER_ENABLED", True)
+    symbol_base_volume: dict[str, float] = field(default_factory=lambda: {"EURUSD":1.0,"USDJPY":2.0,"USDCAD":1.0,"XAUUSD":0.1,"EURGBP":1.0,"GBPUSD":1.0})
+    cancel_stale_pending_orders: bool = _bool("CANCEL_STALE_PENDING_ORDERS", False)
 
 
 config = AppConfig()

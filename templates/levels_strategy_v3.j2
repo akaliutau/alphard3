@@ -1,0 +1,45 @@
+{% extends "base_rules_v3.j2" %}
+
+{% block analysis_guidelines %}
+Use horizontal levels as the main signal source.
+
+Level rules:
+1. BUY only on:
+   - clean resistance breakout + retest holding as support, or
+   - strong bullish rejection from visible support.
+
+2. SELL only on:
+   - clean support breakdown + retest failing as resistance, or
+   - strong bearish rejection from visible resistance.
+
+3. Breakouts require:
+   - candle close clearly beyond the level,
+   - no immediate failed-break wick,
+   - enough room to next target,
+   - supportive relative volume if available.
+
+4. Rejections require:
+   - clear wick or reversal candle at the level,
+   - rejection not occurring in the middle of the range,
+   - target not blocked by nearby opposite level.
+
+5. Prefer fewer, higher-quality trades.
+   HOLD if the setup is not visually obvious.
+
+6. Combine:
+   - trend direction,
+   - candle structure,
+   - level reaction,
+   - volatility,
+   - relative volume.
+
+7. If local trend contradicts level reaction, either HOLD or reduce confidence.
+
+8. Prefer limit entry on a 30–50% pullback/retest after impulse.
+   Do not chase if price has already moved far from the level.
+
+9. Adjust strictness by instrument:
+   - XAUUSD/metals need cleaner confirmation and more room because false breaks and wide swings are common.
+   - FX volume is usually relative/tick volume, so price reaction matters more than volume.
+   - Crosses/exotics need stronger confirmation due to spread/liquidity risk.
+{% endblock %}

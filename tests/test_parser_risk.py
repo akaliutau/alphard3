@@ -29,3 +29,35 @@ def test_risk_adjusts_invalid_sell_limit_entry_above_ask(monkeypatch):
     assert r.entry_price is not None
     assert r.entry_price > tick.ask
     assert d.take_profit < r.entry_price < d.stop_loss
+
+
+def test_risk_autocorrects_buy_stop_loss_too_close_to_entry():
+    d = Decision(
+        status="BUY",
+        allocation=0.5,
+        confidence=0.9,
+        stop_loss=1.10015,
+        take_profit=1.10100,
+        levels={"support": [1.09980], "resistance": [1.10100]},
+    )
+    tick = Tick(bid=1.10020, ask=1.10022)
+    info = SymbolInfo(name="EURUSD", digits=5, point=0.00001, volume_min=0.01, volume_step=0.01)
+
+    r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
+
+    assert r.approved
+    assert r.entry_price is not None
+    assert d.stop_loss < r.entry_price
+    assert abs(r.entry_price - d.stop_loss) >= 20 * info.point
+    assert r.adjusted.get("sl_adjustment")
+
+
+def test_xauusd_uses_symbol_volume_map():
+    d = Decision(status="BUY", allocation=0.5, confidence=0.9, stop_loss=2349.50, take_profit=2351.00)
+    tick = Tick(bid=2350.00, ask=2350.01)
+    info = SymbolInfo(name="XAUUSD", digits=2, point=0.01, volume_min=0.001, volume_step=0.001)
+
+    r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
+
+    assert r.approved
+    assert r.volume == 0.001

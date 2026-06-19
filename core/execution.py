@@ -40,40 +40,85 @@ class ExecutionEngine:
             return result
 
         assert decision.side is not None
-        entry = risk.entry_price or (tick.ask if decision.side == "buy" else tick.bid)
-        body = {
-            "symbol": symbol,
-            "side": decision.side,
-            "volume": risk.volume,
-            "sl": round(float(decision.stop_loss), info.digits) if decision.stop_loss is not None else None,
-            "tp": round(float(decision.take_profit), info.digits) if decision.take_profit is not None else None,
-            "deviation": config.mt5_deviation,
-            "magic": config.mt5_magic,
-            #"comment": f"{config.app_name}-{strategy}-{uid}",
-            "type_filling": config.mt5_type_filling,
-        }
-        if config.execution_mode == "pending_limit":
-            body.update({"order_kind": "limit", "price": round(float(entry), info.digits)})
+        bodies = self._request_bodies(symbol, decision, risk, tick, info)
+        request_payload = {"orders": bodies} if len(bodies) > 1 else bodies[0]
 
         if config.dry_run:
-            result = ExecutionResult(attempted=True, dry_run=True, request=body, ok=True)
+            result = ExecutionResult(attempted=True, dry_run=True, request=request_payload, ok=True)
             self._log(symbol, uid, strategy, result)
-            logger.info("DRY_RUN: would execute %s", body)
+            logger.info("DRY_RUN: would execute %s", request_payload)
             return result
 
+        responses = []
         try:
-            if config.execution_mode == "market":
-                response = await self.api.open_deal(body)
-            else:
-                response = await self.api.place_pending_order(body)
-            retcode = response.get("retcode") or (response.get("result") or {}).get("retcode")
-            print(response)
-            result = ExecutionResult(attempted=True, dry_run=False, request=body, response=response, ok=True, retcode=retcode)
+            for body in bodies:
+                if config.execution_mode == "market":
+                    response = await self.api.open_deal(body)
+                else:
+                    response = await self.api.place_pending_order(body)
+                responses.append(response)
+            first_response = responses[0] if responses else {}
+            print(first_response)
+            retcode = first_response.get("retcode") or (first_response.get("result") or {}).get("retcode")
+            result = ExecutionResult(
+                attempted=True,
+                dry_run=False,
+                request=request_payload,
+                response={"orders": responses} if len(responses) > 1 else first_response,
+                ok=True,
+                retcode=retcode,
+            )
         except Exception as exc:
-            result = ExecutionResult(attempted=True, dry_run=False, request=body, ok=False, error=str(exc))
+            result = ExecutionResult(
+                attempted=True,
+                dry_run=False,
+                request=request_payload,
+                response={"orders": responses} if responses else {},
+                ok=False,
+                error=str(exc),
+            )
 
         self._log(symbol, uid, strategy, result)
         return result
+
+    def _request_bodies(
+        self,
+        symbol: str,
+        decision: Decision,
+        risk: RiskResult,
+        tick: Tick,
+        info: SymbolInfo,
+    ) -> list[dict[str, Any]]:
+        plans = risk.adjusted.get("orders") if isinstance(risk.adjusted, dict) else None
+        if not isinstance(plans, list) or not plans:
+            entry = risk.entry_price or (tick.ask if decision.side == "buy" else tick.bid)
+            plans = [
+                {
+                    "entry_price": entry,
+                    "volume": risk.volume,
+                    "stop_loss": decision.stop_loss,
+                    "take_profit": decision.take_profit,
+                    "order_kind": risk.order_kind,
+                }
+            ]
+
+        bodies = []
+        for plan in plans:
+            body = {
+                "symbol": symbol,
+                "side": decision.side,
+                "volume": float(plan.get("volume", risk.volume)),
+                "sl": round(float(plan["stop_loss"]), info.digits) if plan.get("stop_loss") is not None else None,
+                "tp": round(float(plan["take_profit"]), info.digits) if plan.get("take_profit") is not None else None,
+                "deviation": config.mt5_deviation,
+                "magic": config.mt5_magic,
+                #"comment": f"{config.app_name}-{strategy}-{uid}",
+                "type_filling": config.mt5_type_filling,
+            }
+            if config.execution_mode == "pending_limit":
+                body.update({"order_kind": "limit", "price": round(float(plan["entry_price"]), info.digits)})
+            bodies.append(body)
+        return bodies
 
     def _log(self, symbol: str, uid: int, strategy: str, result: ExecutionResult) -> None:
         self.ledger.log(EventType.TRADE, symbol=symbol, uid=uid, strategy=strategy, timeframe=config.timeframe, data=asdict(result))
