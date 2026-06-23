@@ -8,7 +8,7 @@ Type=oneshot
 EnvironmentFile=/etc/alphard/runner.env
 
 # Keep below 15m so the next M15 slot has cleanup margin.
-TimeoutStartSec=4min
+TimeoutStartSec=8min
 TimeoutStopSec=30s
 TimeoutStartFailureMode=terminate
 KillMode=control-group

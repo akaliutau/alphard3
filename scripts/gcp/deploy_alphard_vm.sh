@@ -17,7 +17,7 @@ SERVICE_ACCOUNT_NAME="${SA_NAME:-alphard-trader-sa}"
 STATE_DISK="${STATE_DISK:-alphard-state}"
 STATE_DISK_SIZE="${STATE_DISK_SIZE:-50GB}"
 BOOT_DISK_SIZE="${BOOT_DISK_SIZE:-20GB}"
-RUN_INTERVAL_MINUTES="${RUN_INTERVAL_MINUTES:-5}"
+RUN_INTERVAL_MINUTES="${RUN_INTERVAL_MINUTES:-10}"
 RUN_NOW="${RUN_NOW:-false}"
 OVERWRITE_ENV="${OVERWRITE_ENV:-false}"
 DRY_RUN="${DRY_RUN:-true}"
@@ -53,6 +53,7 @@ require_file app.py
 require_file ops/bin/alphard-run-once.sh
 require_file ops/systemd/alphard.service
 require_file ops/systemd/alphard-m5.timer
+require_file ops/systemd/alphard-m10.timer
 require_file ops/systemd/alphard-m15.timer
 require_file ops/systemd/alphard-m30.timer
 require_file scripts/gcp/install_alphard_vm.sh
@@ -66,6 +67,8 @@ if [[ "$RUN_INTERVAL_MINUTES" == "30" ]]; then
   TIMER_MODE="m30"
 elif [[ "$RUN_INTERVAL_MINUTES" == "5" ]]; then
   TIMER_MODE="m5"
+elif [[ "$RUN_INTERVAL_MINUTES" == "10" ]]; then
+  TIMER_MODE="m10"
 elif [[ "$RUN_INTERVAL_MINUTES" != "15" ]]; then
   echo "RUN_INTERVAL_MINUTES must be 5, 15 or 30 for the supplied systemd timers." >&2
   exit 2
@@ -123,6 +126,7 @@ mkdir -p "$TMPDIR/ops/bin" "$TMPDIR/ops/systemd" "$TMPDIR/scripts/gcp" "$TMPDIR/
 install -m 0755 ops/bin/alphard-run-once.sh "$TMPDIR/ops/bin/alphard-run-once.sh"
 install -m 0644 ops/systemd/alphard.service "$TMPDIR/ops/systemd/alphard.service"
 install -m 0644 ops/systemd/alphard-m5.timer "$TMPDIR/ops/systemd/alphard-m5.timer"
+install -m 0644 ops/systemd/alphard-m10.timer "$TMPDIR/ops/systemd/alphard-m10.timer"
 install -m 0644 ops/systemd/alphard-m15.timer "$TMPDIR/ops/systemd/alphard-m15.timer"
 install -m 0644 ops/systemd/alphard-m30.timer "$TMPDIR/ops/systemd/alphard-m30.timer"
 install -m 0755 scripts/gcp/install_alphard_vm.sh "$TMPDIR/scripts/gcp/install_alphard_vm.sh"

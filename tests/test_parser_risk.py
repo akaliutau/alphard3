@@ -303,3 +303,215 @@ def test_pullback_ratio_execution_reprices_from_fresh_tick_and_sl(tmp_path):
     assert api.sent
     assert api.sent[0]["price"] == 1.09940
     assert api.sent[0]["sl"] < api.sent[0]["price"] < api.sent[0]["tp"]
+
+
+def test_split_order_ratio_creates_runner_and_partial_take_profit():
+    from utilities.settings import config
+
+    old_strategy = config.strategy_name
+    old_execution_mode = config.execution_mode
+    old_split = config.split_order_enabled
+    old_split_ratio = config.split_order_ratio
+    old_partial_tp_ratio = config.split_partial_tp_ratio
+    old_max_volume = config.max_volume
+    old_max_allocation = config.max_allocation
+    object.__setattr__(config, "strategy_name", "pullback_ratio_strategy")
+    object.__setattr__(config, "execution_mode", "pending_limit")
+    object.__setattr__(config, "split_order_enabled", True)
+    object.__setattr__(config, "split_order_ratio", 0.40)
+    object.__setattr__(config, "split_partial_tp_ratio", 0.60)
+    object.__setattr__(config, "max_volume", 0.10)
+    object.__setattr__(config, "max_allocation", 1.00)
+    try:
+        d = Decision(status="BUY", allocation=1.0, confidence=1.0, stop_loss=1.09900, take_profit=1.10200)
+        tick = Tick(bid=1.10000, ask=1.10002)
+        info = SymbolInfo(name="EURUSD", digits=5, point=0.00001, volume_min=0.01, volume_step=0.01)
+
+        r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
+    finally:
+        object.__setattr__(config, "strategy_name", old_strategy)
+        object.__setattr__(config, "execution_mode", old_execution_mode)
+        object.__setattr__(config, "split_order_enabled", old_split)
+        object.__setattr__(config, "split_order_ratio", old_split_ratio)
+        object.__setattr__(config, "split_partial_tp_ratio", old_partial_tp_ratio)
+        object.__setattr__(config, "max_volume", old_max_volume)
+        object.__setattr__(config, "max_allocation", old_max_allocation)
+
+    assert r.approved
+    orders = r.adjusted["orders"]
+    assert len(orders) == 2
+    assert orders[0]["split_role"] == "runner"
+    assert orders[1]["split_role"] == "partial"
+    assert orders[0]["entry_price"] == orders[1]["entry_price"] == r.entry_price
+    assert orders[0]["volume"] == 0.04
+    assert orders[1]["volume"] == 0.06
+    assert orders[0]["take_profit"] == 1.10200
+    assert orders[1]["take_profit"] == 1.10096
+
+
+def test_split_order_execution_uses_same_fresh_entry_for_both_legs(tmp_path):
+    import asyncio
+    from core.execution import ExecutionEngine
+    from core.ledger import Ledger
+    from core.models import RiskResult
+    from utilities.settings import config
+
+    class Api:
+        def __init__(self):
+            self.sent = []
+
+        async def tick(self, symbol):
+            return (
+                Tick(bid=1.10000, ask=1.10002),
+                SymbolInfo(name=symbol, digits=5, point=0.00001, volume_min=0.01, volume_step=0.01, raw={"trade_tick_size": 0.00001}),
+            )
+
+        async def place_pending_order(self, body):
+            self.sent.append(dict(body))
+            return {"ok": True, "retcode": 10008, "result": {"retcode": 10008}}
+
+    old_dry_run = config.dry_run
+    old_execution_mode = config.execution_mode
+    old_timeframe = config.timeframe
+    old_strategy = config.strategy_name
+    old_pullback_ratio = config.pullback_ratio
+    object.__setattr__(config, "dry_run", False)
+    object.__setattr__(config, "execution_mode", "pending_limit")
+    object.__setattr__(config, "timeframe", "M1")
+    object.__setattr__(config, "strategy_name", "pullback_ratio_strategy")
+    object.__setattr__(config, "pullback_ratio", 0.60)
+    try:
+        api = Api()
+        engine = ExecutionEngine(api, Ledger(tmp_path / "split_exec.sqlite3"))
+        decision = Decision(status="BUY", allocation=1.0, confidence=1.0, stop_loss=1.09900, take_profit=1.10200)
+        risk = RiskResult(
+            approved=True,
+            reason="approved",
+            volume=0.1,
+            entry_price=1.09940,
+            adjusted={
+                "orders": [
+                    {
+                        "entry_price": 1.09940,
+                        "volume": 0.04,
+                        "stop_loss": 1.09900,
+                        "take_profit": 1.10200,
+                        "full_take_profit": 1.10200,
+                        "tp_ratio": 1.0,
+                    },
+                    {
+                        "entry_price": 1.09940,
+                        "volume": 0.06,
+                        "stop_loss": 1.09900,
+                        "take_profit": 1.10096,
+                        "full_take_profit": 1.10200,
+                        "tp_ratio": 0.60,
+                    },
+                ]
+            },
+        )
+        stale_tick = Tick(bid=1.10050, ask=1.10052)
+        stale_info = SymbolInfo(name="EURUSD", digits=5, point=0.00001, volume_min=0.01, volume_step=0.01)
+        result = asyncio.run(engine.execute("EURUSD", 202606191646, "pullback_ratio_strategy", decision, risk, stale_tick, stale_info))
+    finally:
+        object.__setattr__(config, "dry_run", old_dry_run)
+        object.__setattr__(config, "execution_mode", old_execution_mode)
+        object.__setattr__(config, "timeframe", old_timeframe)
+        object.__setattr__(config, "strategy_name", old_strategy)
+        object.__setattr__(config, "pullback_ratio", old_pullback_ratio)
+
+    assert result.ok
+    assert len(api.sent) == 2
+    assert api.sent[0]["price"] == api.sent[1]["price"] == 1.09940
+    assert api.sent[0]["sl"] == api.sent[1]["sl"]
+    assert api.sent[0]["volume"] == 0.04
+    assert api.sent[1]["volume"] == 0.06
+    assert api.sent[0]["tp"] > api.sent[1]["tp"] > api.sent[0]["price"]
+
+
+def test_execution_expands_buy_limit_sl_to_broker_stop_level(tmp_path):
+    import asyncio
+    from core.execution import ExecutionEngine
+    from core.ledger import Ledger
+    from core.models import RiskResult
+    from utilities.settings import config
+
+    class Api:
+        def __init__(self):
+            self.sent = []
+
+        async def tick(self, symbol):
+            return (
+                Tick(bid=0.92637, ask=0.92639),
+                SymbolInfo(
+                    name=symbol,
+                    digits=5,
+                    point=0.00001,
+                    volume_min=0.01,
+                    volume_step=0.01,
+                    raw={"trade_tick_size": 0.00001, "trade_stops_level": 40},
+                ),
+            )
+
+        async def place_pending_order(self, body):
+            self.sent.append(dict(body))
+            return {"ok": True, "retcode": 10008, "result": {"retcode": 10008}}
+
+    old_dry_run = config.dry_run
+    old_execution_mode = config.execution_mode
+    old_timeframe = config.timeframe
+    old_min_stop_distance_points = config.min_stop_distance_points
+    object.__setattr__(config, "dry_run", False)
+    object.__setattr__(config, "execution_mode", "pending_limit")
+    object.__setattr__(config, "timeframe", "M1")
+    object.__setattr__(config, "min_stop_distance_points", 20)
+    try:
+        api = Api()
+        engine = ExecutionEngine(api, Ledger(tmp_path / "eurchf_invalid_stops.sqlite3"))
+        decision = Decision(status="BUY", allocation=0.5, confidence=0.9, stop_loss=0.92574, take_profit=0.92653)
+        risk = RiskResult(approved=True, reason="approved", volume=2.54, entry_price=0.92595)
+        stale_tick = Tick(bid=0.92600, ask=0.92602)
+        stale_info = SymbolInfo(name="EURCHF", digits=5, point=0.00001, volume_min=0.01, volume_step=0.01)
+        result = asyncio.run(engine.execute("EURCHF", 202606220101, "levels_strategy", decision, risk, stale_tick, stale_info))
+    finally:
+        object.__setattr__(config, "dry_run", old_dry_run)
+        object.__setattr__(config, "execution_mode", old_execution_mode)
+        object.__setattr__(config, "timeframe", old_timeframe)
+        object.__setattr__(config, "min_stop_distance_points", old_min_stop_distance_points)
+
+    assert result.ok
+    assert api.sent
+    body = api.sent[0]
+    assert body["price"] == 0.92595
+    # Broker stop level is 40 points; app adds two points plus one tick of slack.
+    assert round(body["price"] - body["sl"], 5) >= 0.00043
+    assert round(body["tp"] - body["price"], 5) >= 0.00043
+
+
+def test_risk_uses_broker_stop_level_when_repairing_pending_sl():
+    from utilities.settings import config
+
+    old_execution_mode = config.execution_mode
+    old_min_stop_distance_points = config.min_stop_distance_points
+    object.__setattr__(config, "execution_mode", "pending_limit")
+    object.__setattr__(config, "min_stop_distance_points", 20)
+    try:
+        d = Decision(status="BUY", allocation=0.5, confidence=0.9, stop_loss=0.92574, take_profit=0.92653)
+        tick = Tick(bid=0.92599, ask=0.92601)
+        info = SymbolInfo(
+            name="EURCHF",
+            digits=5,
+            point=0.00001,
+            volume_min=0.01,
+            volume_step=0.01,
+            raw={"trade_tick_size": 0.00001, "trade_stops_level": 40},
+        )
+
+        r = RiskEngine().validate(d, tick, info, positions=[], orders=[])
+    finally:
+        object.__setattr__(config, "execution_mode", old_execution_mode)
+        object.__setattr__(config, "min_stop_distance_points", old_min_stop_distance_points)
+
+    assert r.approved
+    assert r.entry_price is not None
+    assert round(r.entry_price - d.stop_loss, 5) >= 0.00043

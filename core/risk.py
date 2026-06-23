@@ -112,7 +112,7 @@ class RiskEngine:
         if d.stop_loss is None or d.take_profit is None:
             return RiskResult(False, "missing stop_loss or take_profit")
         ref = tick.ask if d.side == "buy" else tick.bid
-        min_dist = config.min_stop_distance_points * info.point
+        min_dist = self._protection_distance(info)
         if d.side == "buy":
             if not (d.stop_loss < ref < d.take_profit):
                 return RiskResult(False, f"BUY requires stop_loss < price < take_profit; sl={d.stop_loss}, price={ref}, tp={d.take_profit}")
@@ -131,7 +131,7 @@ class RiskEngine:
         if config.execution_mode != "pending_limit":
             return None
 
-        min_dist = config.min_stop_distance_points * info.point
+        min_dist = self._protection_distance(info)
 
         if d.side == "buy":
             if not (entry < tick.bid):
@@ -177,16 +177,35 @@ class RiskEngine:
         return None
 
     def _pending_limit_gap(self, info: SymbolInfo, multiplier: int = 1) -> float:
-        raw_stops_level = info.raw.get("trade_stops_level") or info.raw.get("stops_level") or 0
-        try:
-            broker_stop_points = int(raw_stops_level)
-        except Exception:
-            broker_stop_points = 0
-
         noise_points = max(0, min(int(config.entry_noise_points), 5))
-        # A limit order still needs to be on the correct side of the spread; use at least one point.
-        points = max(noise_points * max(1, multiplier), broker_stop_points + 1, 1)
+        # A limit order still needs to be on the correct side of the spread,
+        # and MT5 also requires it to satisfy the broker stops level.
+        points = max(noise_points * max(1, multiplier), self._broker_stop_points(info) + 2, 2)
         return points * info.point
+
+    def _protection_distance(self, info: SymbolInfo) -> float:
+        points = max(int(config.min_stop_distance_points), self._broker_stop_points(info) + 2, 1)
+        return points * info.point + self._tick_size(info)
+
+    def _broker_stop_points(self, info: SymbolInfo) -> int:
+        values = []
+        for key in ("trade_stops_level", "stops_level", "trade_freeze_level", "freeze_level"):
+            raw = info.raw.get(key)
+            if raw is None:
+                continue
+            try:
+                values.append(int(raw))
+            except Exception:
+                continue
+        return max(values, default=0)
+
+    def _tick_size(self, info: SymbolInfo) -> float:
+        raw = info.raw.get("trade_tick_size") or info.raw.get("tick_size") or info.point
+        try:
+            tick_size = float(raw)
+        except Exception:
+            tick_size = info.point
+        return tick_size if tick_size > 0 else info.point
 
     def _entry_price(self, d: Decision, tick: Tick, info: SymbolInfo) -> float:
         if config.execution_mode == "market":
@@ -250,10 +269,10 @@ class RiskEngine:
             return {}
 
         adjustments: dict[str, Any] = {}
-        min_dist = config.min_stop_distance_points * info.point
-        # Add one point of slack so rounding and broker-side comparisons do not
-        # turn an exactly-on-threshold value back into "too close".
-        min_effective = min_dist + max(info.point, self._pending_limit_gap(info) * 0.05)
+        # Use the larger of app policy and broker stops level. Add slack so
+        # rounding and broker-side comparisons do not turn an exactly-on-
+        # threshold value back into "too close".
+        min_effective = self._protection_distance(info) + max(self._tick_size(info), self._pending_limit_gap(info) * 0.05)
         min_rr = max(float(config.min_reward_risk_ratio), 0.0)
 
         original_sl = float(d.stop_loss)
@@ -294,7 +313,7 @@ class RiskEngine:
                 "from": original_sl,
                 "to": sl,
                 "entry": entry,
-                "min_distance_points": config.min_stop_distance_points,
+                "min_distance_points": round(min_effective / info.point, 2),
             }
         if tp != original_tp:
             d.take_profit = tp
@@ -348,42 +367,43 @@ class RiskEngine:
             "volume": volume,
             "stop_loss": float(d.stop_loss),
             "take_profit": float(d.take_profit),
+            "full_take_profit": float(d.take_profit),
+            "tp_ratio": 1.0,
             "order_kind": d.order_kind,
         }
         if not config.split_order_enabled or config.execution_mode != "pending_limit":
             return [base]
 
-        first_volume = self._normalize_volume(volume / 2.0, info, enforce_min=False)
-        second_volume = self._normalize_volume(volume - first_volume, info, enforce_min=False)
-        if first_volume < info.volume_min or second_volume < info.volume_min:
+        runner_ratio = self._clamp(float(config.split_order_ratio), 0.0, 1.0)
+        partial_tp_ratio = self._clamp(float(config.split_partial_tp_ratio), 0.0, 1.0)
+        runner_volume = self._normalize_volume(volume * runner_ratio, info, enforce_min=False)
+        partial_volume = self._normalize_volume(volume - runner_volume, info, enforce_min=False)
+        if runner_volume < info.volume_min or partial_volume < info.volume_min:
             return [base]
 
-        if self._uses_pullback_ratio_entry() and d.stop_loss is not None:
-            second_entry = self._entry_price_for_pullback(d, tick, info, split_leg=2)
-        else:
-            second_entry = self._entry_price_for_gap(d, tick, info, multiplier=config.split_second_entry_multiplier)
-        min_rr = max(float(config.min_reward_risk_ratio), 0.0)
+        partial_tp = self._scaled_take_profit(d.side, entry, float(d.take_profit), partial_tp_ratio, info)
         if d.side == "buy":
-            if not (float(d.stop_loss) < second_entry < float(d.take_profit)):
-                return [base]
-            risk = entry - float(d.stop_loss)
-            # The close leg must still satisfy the same reward/risk floor;
-            # otherwise splitting silently creates a low-quality first order.
-            close_tp = round(entry + risk * min_rr, info.digits)
-            if not (entry < close_tp < float(d.take_profit)):
+            if not (entry < partial_tp < float(d.take_profit)):
                 return [base]
         else:
-            if not (float(d.take_profit) < second_entry < float(d.stop_loss)):
-                return [base]
-            risk = float(d.stop_loss) - entry
-            close_tp = round(entry - risk * min_rr, info.digits)
-            if not (float(d.take_profit) < close_tp < entry):
+            if not (float(d.take_profit) < partial_tp < entry):
                 return [base]
 
         return [
-            {**base, "volume": first_volume, "take_profit": close_tp},
-            {**base, "entry_price": second_entry, "volume": second_volume},
+            {**base, "volume": runner_volume, "split_role": "runner"},
+            {
+                **base,
+                "volume": partial_volume,
+                "take_profit": partial_tp,
+                "tp_ratio": partial_tp_ratio,
+                "split_role": "partial",
+            },
         ]
+
+    def _scaled_take_profit(self, side: str | None, entry: float, take_profit: float, ratio: float, info: SymbolInfo) -> float:
+        if side == "buy":
+            return round(entry + (take_profit - entry) * ratio, info.digits)
+        return round(entry - (entry - take_profit) * ratio, info.digits)
 
     def _volume(self, d: Decision, info: SymbolInfo) -> tuple[float, dict[str, Any]]:
         min_volume = info.volume_min or 0.0

@@ -36,7 +36,7 @@ class ImageStorage:
         if self.provider == "gcs":
             if not self.bucket_name:
                 raise ValueError("GCS image provider requires GCS_BUCKET_NAME/BUCKET_NAME")
-            blob_name = f"charts/{symbol}/{uid}/{image_path.name}"
+            blob_name = f"charts/{symbol}/{image_path.name}"
             refs = self._upload_to_gcs(image_path, blob_name)
             # LiteLLM/OpenAI-compatible multimodal messages use image_url. Public HTTPS is most portable.
             prompt_url = refs["web_url"] if self.public_read else refs["gcs_uri"]

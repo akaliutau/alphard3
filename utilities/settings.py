@@ -115,11 +115,13 @@ class AppConfig:
     entry_pullback_points: int = _int("ENTRY_PULLBACK_POINTS", 30)  # legacy; no longer used for pending entry placement
     pullback_ratio: float = _float("PULLBACK_RATIO", 0.60)
     split_second_entry_multiplier: int = _int("SPLIT_SECOND_ENTRY_MULTIPLIER", 8)
+    split_order_ratio: float = _float("SPLIT_ORDER_RATIO", 0.40)
+    split_partial_tp_ratio: float = _float("SPLIT_PARTIAL_TP_RATIO", 0.60)
     min_stop_distance_points: int = _int("MIN_STOP_DISTANCE_POINTS", 20)
     min_reward_risk_ratio: float = _float("MIN_REWARD_RISK_RATIO", 1.05)
     split_order_enabled: bool = _bool("SPLIT_ORDER_ENABLED", True)
     symbol_base_volume: dict[str, float] = field(default_factory=lambda:
-    {"EURUSD":10.0,"USDJPY":20.0,"USDCAD":10.0,"EURCHF":10.0,"XAUUSD":1.0,"EURGBP":10.0,"GBPUSD":10.0})
+    {"EURUSD":10.0,"USDJPY":20.0,"USDCAD":20.0,"USDCHF":20.0, "EURCHF":20.0,"XAUUSD":1.0,"EURGBP":20.0,"GBPUSD":15.0})
     cancel_stale_pending_orders: bool = _bool("CANCEL_STALE_PENDING_ORDERS", False)
 
 

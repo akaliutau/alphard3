@@ -8,7 +8,7 @@ if [[ -f "${PAYLOAD_DIR}/install.env" ]]; then
   source "${PAYLOAD_DIR}/install.env"
 fi
 
-TIMER_MODE="${TIMER_MODE:-m5}"
+TIMER_MODE="${TIMER_MODE:-m10}"
 OVERWRITE_ENV="${OVERWRITE_ENV:-false}"
 RUN_NOW="${RUN_NOW:-false}"
 
@@ -33,6 +33,9 @@ install -m 0644 "${PAYLOAD_DIR}/ops/systemd/alphard.service" \
 
 install -m 0644 "${PAYLOAD_DIR}/ops/systemd/alphard-m5.timer" \
   /etc/systemd/system/alphard-m5.timer
+
+install -m 0644 "${PAYLOAD_DIR}/ops/systemd/alphard-m10.timer" \
+  /etc/systemd/system/alphard-m10.timer
 
 install -m 0644 "${PAYLOAD_DIR}/ops/systemd/alphard-m15.timer" \
   /etc/systemd/system/alphard-m15.timer
@@ -77,11 +80,14 @@ grep -q '^ALPHARD_CONTAINER_NAME=' /etc/alphard/runner.env
 
 systemctl daemon-reload
 
-systemctl disable --now alphard-m15.timer alphard-m30.timer >/dev/null 2>&1 || true
+systemctl disable --now alphard-m15.timer alphard-m30.timer alphard-m5.timer alphard-m10.timer >/dev/null 2>&1 || true
 
 case "$TIMER_MODE" in
   m5)
     systemctl enable --now alphard-m5.timer
+    ;;
+  m10)
+    systemctl enable --now alphard-m10.timer
     ;;
   m15)
     systemctl enable --now alphard-m15.timer

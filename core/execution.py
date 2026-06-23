@@ -155,23 +155,31 @@ class ExecutionEngine:
         for index, plan in enumerate(plans, start=1):
             sl = round(float(plan["stop_loss"]), info.digits) if plan.get("stop_loss") is not None else None
             tp = round(float(plan["take_profit"]), info.digits) if plan.get("take_profit") is not None else None
+            full_tp = round(float(plan.get("full_take_profit", plan.get("take_profit"))), info.digits) if plan.get("take_profit") is not None else None
+            tp_ratio = self._clamp(float(plan.get("tp_ratio", 1.0)), 0.0, 1.0)
             price = round(float(plan["entry_price"]), info.digits) if plan.get("entry_price") is not None else None
 
             if config.execution_mode == "pending_limit":
                 # Re-price just-in-time from the fresh tick. The LLM/risk tick can
                 # be several seconds old, and a stale sell/buy limit price easily
-                # becomes MT5 retcode 10015 Invalid price.
-                multiplier = config.split_second_entry_multiplier if index > 1 else 1
+                # becomes MT5 retcode 10015 Invalid price. Split legs intentionally
+                # share the same entry and SL; only volume and TP differ.
                 price = self._pending_limit_price(
                     decision.side,
                     tick,
                     info,
-                    multiplier=multiplier,
+                    multiplier=1,
                     stop_loss=sl,
-                    split_leg=index,
+                    split_leg=1,
                 )
-                sl, tp = self._repair_protection(decision.side, price, sl, tp, info)
+                sl, full_tp = self._repair_protection(decision.side, price, sl, full_tp, info)
+                if tp_ratio < 1.0 and full_tp is not None:
+                    tp = self._scaled_take_profit(decision.side, price, full_tp, tp_ratio, info)
+                    tp = self._ensure_take_profit_distance(decision.side, price, tp, info)
+                else:
+                    tp = full_tp
                 tp = self._spread_adjusted_tp(decision.side, price, tp, tick, info)
+                tp = self._ensure_take_profit_distance(decision.side, price, tp, info)
 
             body = {
                 "symbol": symbol,
@@ -251,16 +259,32 @@ class ExecutionEngine:
         return config.strategy_name in {"pullback_ratio_strategy", "levels_pullback_ratio_strategy"}
 
     def _pending_limit_gap(self, info: SymbolInfo, multiplier: int = 1) -> float:
-        raw_stops_level = info.raw.get("trade_stops_level") or info.raw.get("stops_level") or 0
-        try:
-            broker_stop_points = int(raw_stops_level)
-        except Exception:
-            broker_stop_points = 0
-        # Use at least two points beyond the broker stop level to avoid exact
-        # boundary comparisons on fast-moving symbols like XAUUSD.
+        # Distance between current quote and pending entry. MT5 validates this
+        # against the broker stops level before the order is accepted.
         noise_points = max(0, min(int(config.entry_noise_points), 10))
-        points = max(noise_points * max(1, multiplier), broker_stop_points + 2, 2)
+        points = max(noise_points * max(1, multiplier), self._broker_stop_points(info) + 2, 2)
         return points * info.point
+
+    def _protection_distance(self, info: SymbolInfo) -> float:
+        # Distance between pending entry and SL/TP. This must use the larger of
+        # app policy and broker stop-level policy. The previous code used only
+        # MIN_STOP_DISTANCE_POINTS here, so a broker requiring more than 20
+        # points could reject an otherwise well-shaped pending order as
+        # retcode=10016 Invalid stops.
+        points = max(int(config.min_stop_distance_points), self._broker_stop_points(info) + 2, 1)
+        return points * info.point + self._tick_size(info)
+
+    def _broker_stop_points(self, info: SymbolInfo) -> int:
+        values = []
+        for key in ("trade_stops_level", "stops_level", "trade_freeze_level", "freeze_level"):
+            raw = info.raw.get(key)
+            if raw is None:
+                continue
+            try:
+                values.append(int(raw))
+            except Exception:
+                continue
+        return max(values, default=0)
 
     def _repair_protection(
         self,
@@ -273,7 +297,7 @@ class ExecutionEngine:
         if stop_loss is None or take_profit is None:
             return stop_loss, take_profit
 
-        min_dist = config.min_stop_distance_points * info.point + self._tick_size(info)
+        min_dist = self._protection_distance(info)
         min_rr = max(float(config.min_reward_risk_ratio), 0.0)
         sl = float(stop_loss)
         tp = float(take_profit)
@@ -315,6 +339,38 @@ class ExecutionEngine:
 
         adjusted = min(entry - self._tick_size(info), float(take_profit) + spread_gap)
         return self._align_price(adjusted, info, direction="up")
+
+    def _scaled_take_profit(
+        self,
+        side: str | None,
+        entry: float,
+        take_profit: float,
+        ratio: float,
+        info: SymbolInfo,
+    ) -> float:
+        ratio = self._clamp(float(ratio), 0.0, 1.0)
+        if side == "buy":
+            target = entry + (float(take_profit) - entry) * ratio
+            return self._align_price(target, info, direction="down")
+
+        target = entry - (entry - float(take_profit)) * ratio
+        return self._align_price(target, info, direction="up")
+
+    def _ensure_take_profit_distance(
+        self,
+        side: str | None,
+        entry: float,
+        take_profit: float | None,
+        info: SymbolInfo,
+    ) -> float | None:
+        if take_profit is None:
+            return None
+
+        min_gap = self._protection_distance(info)
+        if side == "buy":
+            return self._align_price(max(float(take_profit), entry + min_gap), info, direction="up")
+
+        return self._align_price(min(float(take_profit), entry - min_gap), info, direction="down")
 
     def _clamp(self, value: float, lower: float, upper: float) -> float:
         return max(lower, min(upper, value))
