@@ -29,6 +29,9 @@
 > [!IMPORTANT]
 > **Alphard is a research and advisory system, not financial advice.** The current live runtime has fully automatic and semi-automatic mode. Any execution must be handled by a separate, independently validated executor (see other repositories in Alphard project) or human review process. AI can make mistakes.
 
+High-Quality video Demo can be downloaded from Cloud Storage: 
+https://drive.google.com/file/d/1i92IcMuiTxwtEXlTg89Rz1SbRv3REKHL/view
+
 ## ✨ What is Alphard?
 
 **Alphard** is a hybrid AI trading system for MetaTrader 5. Named after the brightest star in Hydra, it bridges two worlds that usually do not meet cleanly:
