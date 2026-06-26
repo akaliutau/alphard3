@@ -65,6 +65,8 @@ Picture below shows the example of rendered chart:
 
 ![Rendered Global Chart](docs/charts_EURUSD_EURUSD_global_202606261601_1560bars_global_16x9.png)
 
+The Advisor colab is here: https://colab.research.google.com/drive/1WGLs5KphyLGalvrDHtFbrZlkNV5O6sQQ?usp=sharing
+
 ## 🚀 What makes it different?
 
 <table>
@@ -547,7 +549,6 @@ flowchart TD
 
 Built-in and architectural guardrails:
 
-- **Advisory-only live cycle** — the current `app.py` path does not call MT5 trading endpoints.
 - **Idempotent baskets** — processed symbol/timeframe/UID/strategy combinations are recorded to prevent duplicate work.
 - **Strict recommendation states** — `HOLD` and `ERROR` must never become orders.
 - **Raw audit trail** — raw model text, parsed output, token metrics, latency, chart refs, and error diagnostics are stored.
