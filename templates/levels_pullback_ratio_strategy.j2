@@ -1,0 +1,14 @@
+{% extends "base_pullback_ratio_rules.j2" %}
+
+{% block analysis_guidelines %}
+Run the level-focused pullback-ratio strategy.
+
+Use support/resistance as the main signal source:
+- BUY only after confirmed support reaction, failed breakdown reclaim, or breakout-retest hold.
+- SELL only after confirmed resistance reaction, failed breakout failure, or breakdown-retest fail.
+- Treat levels as candidates, not signals. The level must produce visible candle confirmation.
+- If the current price is in the middle between visible levels, HOLD.
+- If the next opposing level is too close after a {{ "%.0f"|format((pullback_ratio|float) * 100) }}% pullback-limit fill, HOLD.
+{% endblock %}
+
+

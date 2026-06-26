@@ -86,6 +86,10 @@ else
   echo "Keeping bucket private. Vertex/Gemini should access gs:// via the VM service account."
 fi
 
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
+  --member="user:aliaksei.kaliutau@gmail.com" \
+  --role="roles/storage.objectViewer"
+
 if [[ "${CREATE_VM}" == "true" ]]; then
   if ! gcloud compute instances describe "${VM_NAME}" --zone="${ZONE}" >/dev/null 2>&1; then
     echo "Creating stateful light VM ${VM_NAME}"

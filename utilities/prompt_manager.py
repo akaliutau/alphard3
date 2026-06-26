@@ -21,3 +21,5 @@ class PromptManager:
 
     def compose_prompt(self, template_name: str, **kwargs: Any) -> str:
         return self.env.get_template(template_name).render(**kwargs)
+
+

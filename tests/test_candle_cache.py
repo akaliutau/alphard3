@@ -69,3 +69,5 @@ def test_sync_to_splits_midnight_range_and_keeps_target_bar():
         ]
 
     asyncio.run(run())
+
+

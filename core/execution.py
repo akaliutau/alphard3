@@ -6,6 +6,7 @@ from typing import Any
 
 from core.ledger import EventType, Ledger
 from core.models import Decision, ExecutionResult, RiskResult, SymbolInfo, Tick
+from core.pullback_ratio import build_pullback_limit_plan, is_pullback_ratio_strategy, pullback_ratio_for_leg
 from core.mt5_api import MT5Client
 from utilities.settings import config, logger
 
@@ -56,23 +57,25 @@ class ExecutionEngine:
             return result
 
         assert decision.side is not None
+        mode = self._execution_mode(decision)
         exec_tick = tick
         exec_info = info
-        if config.execution_mode == "pending_limit" and not config.dry_run:
+        if not config.dry_run:
             try:
                 exec_tick, exec_info = await self.api.tick(symbol)
                 logger.info(
-                    "%s uid=%s refreshed tick before pending order bid=%s ask=%s",
+                    "%s uid=%s refreshed tick before %s execution bid=%s ask=%s",
                     symbol,
                     uid,
+                    mode,
                     exec_tick.bid,
                     exec_tick.ask,
                 )
             except Exception:
                 # Fall back to the analysis-time tick, but make the risk visible.
-                logger.exception("%s uid=%s could not refresh tick before pending order; using analysis tick", symbol, uid)
+                logger.exception("%s uid=%s could not refresh tick before %s execution; using analysis tick", symbol, uid, mode)
         try:
-            bodies = self._request_bodies(symbol, decision, risk, exec_tick, exec_info)
+            bodies = self._request_bodies(symbol, decision, risk, exec_tick, exec_info, mode=mode)
             request_payload = {"orders": bodies} if len(bodies) > 1 else bodies[0]
         except Exception as exc:
             logger.exception("%s uid=%s failed to build MT5 request", symbol, uid)
@@ -87,11 +90,11 @@ class ExecutionEngine:
             return result
 
         responses = []
-        logger.info("%s uid=%s MT5 execution start mode=%s orders=%s", symbol, uid, config.execution_mode, len(bodies))
+        logger.info("%s uid=%s MT5 execution start mode=%s orders=%s", symbol, uid, mode, len(bodies))
         try:
             for index, body in enumerate(bodies, start=1):
                 logger.info("%s uid=%s MT5 request %s/%s body=%s", symbol, uid, index, len(bodies), body)
-                if config.execution_mode == "market":
+                if mode == "market":
                     response = await self.api.open_deal(body)
                 else:
                     response = await self.api.place_pending_order(body)
@@ -137,7 +140,10 @@ class ExecutionEngine:
         risk: RiskResult,
         tick: Tick,
         info: SymbolInfo,
+        *,
+        mode: str | None = None,
     ) -> list[dict[str, Any]]:
+        mode = mode or self._execution_mode(decision)
         plans = risk.adjusted.get("orders") if isinstance(risk.adjusted, dict) else None
         if not isinstance(plans, list) or not plans:
             entry = risk.entry_price or (tick.ask if decision.side == "buy" else tick.bid)
@@ -159,7 +165,7 @@ class ExecutionEngine:
             tp_ratio = self._clamp(float(plan.get("tp_ratio", 1.0)), 0.0, 1.0)
             price = round(float(plan["entry_price"]), info.digits) if plan.get("entry_price") is not None else None
 
-            if config.execution_mode == "pending_limit":
+            if mode == "pending_limit":
                 # Re-price just-in-time from the fresh tick. The LLM/risk tick can
                 # be several seconds old, and a stale sell/buy limit price easily
                 # becomes MT5 retcode 10015 Invalid price. Split legs intentionally
@@ -181,6 +187,11 @@ class ExecutionEngine:
                 tp = self._spread_adjusted_tp(decision.side, price, tp, tick, info)
                 tp = self._ensure_take_profit_distance(decision.side, price, tp, info)
 
+            if mode == "market":
+                price = tick.ask if decision.side == "buy" else tick.bid
+                sl, full_tp = self._repair_protection(decision.side, price, sl, full_tp, info)
+                tp = self._ensure_take_profit_distance(decision.side, price, full_tp, info)
+
             body = {
                 "symbol": symbol,
                 "side": decision.side,
@@ -194,10 +205,15 @@ class ExecutionEngine:
             # Intentionally do not send a comment field. Some brokers reject
             # non-empty comments, and the upstream MT5 proxy may add its own
             # default comment if that proxy is not patched separately.
-            if config.execution_mode == "pending_limit":
+            if mode == "pending_limit":
                 body.update({"order_kind": "limit", "price": price})
             bodies.append(body)
         return bodies
+
+    def _execution_mode(self, decision: Decision) -> str:
+        if decision.order_kind == "market":
+            return "market"
+        return config.execution_mode
 
     def _pending_limit_price(
         self,
@@ -226,37 +242,24 @@ class ExecutionEngine:
         stop_loss: float,
         split_leg: int = 1,
     ) -> float | None:
-        ratio = self._pullback_ratio(split_leg)
-        min_gap = self._pending_limit_gap(info, multiplier=max(1, split_leg))
-
-        if side == "buy":
-            ref = tick.bid
-            if stop_loss >= ref:
-                return None
-            entry = ref - (ref - stop_loss) * ratio
-            entry = min(entry, ref - min_gap)
-            entry = max(entry, stop_loss + self._tick_size(info))
-            return self._align_price(entry, info, direction="down")
-
-        if side == "sell":
-            ref = tick.ask
-            if stop_loss <= ref:
-                return None
-            entry = ref + (stop_loss - ref) * ratio
-            entry = max(entry, ref + min_gap)
-            entry = min(entry, stop_loss - self._tick_size(info))
-            return self._align_price(entry, info, direction="up")
-
-        return None
+        plan = build_pullback_limit_plan(
+            side=side,
+            bid=tick.bid,
+            ask=tick.ask,
+            stop_loss=float(stop_loss),
+            ratio=float(config.pullback_ratio),
+            min_gap=self._pending_limit_gap(info, multiplier=max(1, split_leg)),
+            tick_size=self._tick_size(info),
+            digits=info.digits,
+            split_leg=split_leg,
+        )
+        return None if plan is None else plan.entry_price
 
     def _pullback_ratio(self, split_leg: int = 1) -> float:
-        base = self._clamp(float(config.pullback_ratio), 0.05, 0.95)
-        if split_leg <= 1:
-            return base
-        return self._clamp(base + (1.0 - base) * 0.5, base, 0.95)
+        return pullback_ratio_for_leg(float(config.pullback_ratio), split_leg)
 
     def _uses_pullback_ratio_entry(self) -> bool:
-        return config.strategy_name in {"pullback_ratio_strategy", "levels_pullback_ratio_strategy"}
+        return is_pullback_ratio_strategy(config.strategy_name)
 
     def _pending_limit_gap(self, info: SymbolInfo, multiplier: int = 1) -> float:
         # Distance between current quote and pending entry. MT5 validates this
@@ -395,3 +398,5 @@ class ExecutionEngine:
 
     def _log(self, symbol: str, uid: int, strategy: str, result: ExecutionResult) -> None:
         self.ledger.log(EventType.TRADE, symbol=symbol, uid=uid, strategy=strategy, timeframe=config.timeframe, data=asdict(result))
+
+

@@ -1,9 +1,14 @@
-{% extends "base_rules_v3.j2" %}
+{% extends "base_pullback_ratio_rules.j2" %}
 
 {% block analysis_guidelines %}
-Focus on clean level-based setups, but do not optimize entry price.
-Your job is to choose direction plus robust stop_loss and take_profit levels only.
-The deterministic execution layer will ignore entry_price and place a pending limit at a 60% pullback from current price toward your stop_loss.
-Use wider, realistic SL/TP levels so the pullback entry remains between current price and stop_loss with enough reward/risk.
-HOLD if the stop/target geometry is unclear or the next meaningful level is too close.
+Run the plain pullback-ratio strategy.
+
+Priorities:
+1. Context direction from CHART 2 controls permission.
+2. CHART 1 must show a confirmed reaction/retest/sweep before any BUY/SELL.
+3. Your stop_loss defines the deterministic pullback LIMIT entry, so choose a structural stop beyond invalidation.
+4. Take profit must be a visible level that still gives enough room from the likely pullback fill.
+5. Prefer HOLD over a trade that only works if entered immediately.
 {% endblock %}
+
+

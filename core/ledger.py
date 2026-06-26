@@ -18,6 +18,7 @@ class EventType(str, Enum):
     CHART = "CHART"
     LLM = "LLM"
     DECISION = "DECISION"
+    RECOMMENDATION = "RECOMMENDATION"
     RISK = "RISK"
     TRADE = "TRADE"
     SYSTEM = "SYSTEM"
@@ -214,3 +215,5 @@ def _json(data: Any) -> str:
     if is_dataclass(data):
         data = asdict(data)
     return json.dumps(data, default=str, ensure_ascii=False)
+
+

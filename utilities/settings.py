@@ -71,12 +71,23 @@ class AppConfig:
     app_name: str = os.getenv("APP_NAME", "alphard")
     env: Literal["local", "cloud"] = os.getenv("APP_ENV", "local")  # type: ignore[assignment]
     dry_run: bool = _bool("DRY_RUN", True)
+    # Advisory-only is the production default for this refactor. The app may still
+    # query MT5 market/account state, but it never places or cancels orders.
+    advisory_only: bool = _bool("ADVISORY_ONLY", True)
     run_interval_minutes: int = _int("RUN_INTERVAL_MINUTES", 15)
     candle_close_delay_seconds: int = _int("CANDLE_CLOSE_DELAY_SECONDS", 30)
     symbols: tuple[str, ...] = tuple(_list("SYMBOLS", "EURUSD"))
     timeframe: str = os.getenv("MT5_TIMEFRAME", "M15")
-    candle_warmup_bars: int = _int("CANDLE_WARMUP_BARS", 220)
-    chart_window_bars: int = _int("CHART_WINDOW_BARS", 96)
+    candle_warmup_bars: int = _int("CANDLE_WARMUP_BARS", 1800)
+    # Detailed chart: the latest execution dynamics. Default is 180 M1 candles (~3h).
+    detailed_analysis_bars: int = _int("DETAILED_ANALYSIS_BARS", 180)
+    # Global chart: approx. 26 hours of M1 candles. 1560 = 26 * 60.
+    global_analysis_bars: int = _int("GLOBAL_ANALYSIS_BARS", 1560)
+    # Legacy names kept for compatibility with tests/scripts and old utilities.
+    chart_window_bars: int = _int("CHART_WINDOW_BARS", _int("DETAILED_ANALYSIS_BARS", 180))
+    chart_context_window_bars: int = _int("CHART_CONTEXT_WINDOW_BARS", _int("GLOBAL_ANALYSIS_BARS", 1560))
+    global_chart_aspect: str = os.getenv("GLOBAL_CHART_ASPECT", "16:9")
+    detailed_chart_aspect: str = os.getenv("DETAILED_CHART_ASPECT", "1:1")
     sqlite_path: Path = ROOT_DIR / os.getenv("SQLITE_PATH", "data/alphard.sqlite3")
 
     mt5_base_url: str = os.getenv("MT5_BASE_URL", os.getenv("BASE_URL", "http://127.0.0.1:8000"))
@@ -87,21 +98,31 @@ class AppConfig:
     mt5_deviation: int = _int("MT5_DEVIATION", 30)
 
     strategy_name: str = os.getenv("STRATEGY_NAME", "levels_strategy")
+    advisory_strategy_name: str = os.getenv("ADVISORY_STRATEGY_NAME", "advisory_two_scale_strategy")
     model_name: str = os.getenv("MODEL_NAME", "gemini-2.5-flash")
     model_id: str = os.getenv("MODEL_ID", "vertex_ai/gemini-2.5-flash")
     vertex_location: str = os.getenv("VERTEX_LOCATION", "global")
     vertex_project: str | None = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
     litellm_timeout_seconds: int = _int("LITELLM_TIMEOUT_SECONDS", 120)
+    # Advisory JSON is larger than the legacy trade command. 4096 tokens can cut
+    # the response mid-object, which makes the recommendation parse as ERROR.
+    litellm_max_tokens: int = _int("LITELLM_MAX_TOKENS", 8192)
     litellm_debug: bool = _bool("LITELLM_DEBUG", False)
     litellm_log_prompt: bool = _bool("LITELLM_LOG_PROMPT", False)
     litellm_log_response: bool = _bool("LITELLM_LOG_RESPONSE", False)
     litellm_response_preview_chars: int = _int("LITELLM_RESPONSE_PREVIEW_CHARS", 600)
+    # Always include this much raw model/output context in ERROR logs and diagnostics.
+    # This is separate from LITELLM_LOG_RESPONSE, so parse failures are visible even
+    # when normal response logging remains disabled.
+    advisory_error_preview_chars: int = _int("ADVISORY_ERROR_PREVIEW_CHARS", 4000)
     litellm_drop_params: bool = _bool("LITELLM_DROP_PARAMS", True)
     litellm_suppress_pydantic_warnings: bool = _bool("LITELLM_SUPPRESS_PYDANTIC_WARNINGS", True)
 
     image_provider: Literal["local", "gcs"] = os.getenv("IMAGE_PROVIDER", "local")  # type: ignore[assignment]
     gcs_bucket_name: str | None = os.getenv("GCS_BUCKET_NAME") or os.getenv("BUCKET_NAME")
     gcs_public_read: bool = _bool("GCS_PUBLIC_READ", False)
+    advisory_latest_pointer_blob: str = os.getenv("ADVISORY_LATEST_POINTER_BLOB", "advice/latest.json")
+    advisory_slot_manifest_name: str = os.getenv("ADVISORY_SLOT_MANIFEST_NAME", "manifest.json")
 
     execution_mode: Literal["pending_limit", "market"] = os.getenv("EXECUTION_MODE", "pending_limit")  # type: ignore[assignment]
     base_volume: float = _float("BASE_VOLUME", 0.01)
@@ -119,9 +140,14 @@ class AppConfig:
     split_partial_tp_ratio: float = _float("SPLIT_PARTIAL_TP_RATIO", 0.60)
     min_stop_distance_points: int = _int("MIN_STOP_DISTANCE_POINTS", 20)
     min_reward_risk_ratio: float = _float("MIN_REWARD_RISK_RATIO", 1.05)
+    # VLM decisions are actionable only after the move has visibly rebounded/
+    # reflected already. The deterministic risk layer also rejects model-declared
+    # chase setups once too much of the path from rebound to TP is consumed.
+    require_evidence_confirmation: bool = _bool("REQUIRE_EVIDENCE_CONFIRMATION", True)
+    max_chase_progress: float = _float("MAX_CHASE_PROGRESS", 0.70)
     split_order_enabled: bool = _bool("SPLIT_ORDER_ENABLED", True)
     symbol_base_volume: dict[str, float] = field(default_factory=lambda:
-    {"EURUSD":10.0,"USDJPY":20.0,"USDCAD":20.0,"USDCHF":20.0, "EURCHF":20.0,"XAUUSD":1.0,"EURGBP":20.0,"GBPUSD":15.0})
+    {"EURUSD":0.1,"USDJPY":0.1,"USDCAD":0.1,"USDCHF":0.1, "EURCHF":0.1,"XAUUSD":1.0,"EURGBP":0.1,"GBPUSD":0.05})
     cancel_stale_pending_orders: bool = _bool("CANCEL_STALE_PENDING_ORDERS", False)
 
 
@@ -141,3 +167,5 @@ def _setup_logger() -> logging.Logger:
 
 
 logger = _setup_logger()
+
+

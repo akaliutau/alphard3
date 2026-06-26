@@ -72,3 +72,5 @@ def next_wakeup_seconds(interval_minutes: int, now: datetime | None = None) -> f
 
 def candle_uid(dt: datetime) -> int:
     return int(dt.astimezone(timezone.utc).strftime("%Y%m%d%H%M"))
+
+

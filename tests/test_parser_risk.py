@@ -515,3 +515,5 @@ def test_risk_uses_broker_stop_level_when_repairing_pending_sl():
     assert r.approved
     assert r.entry_price is not None
     assert round(r.entry_price - d.stop_loss, 5) >= 0.00043
+
+

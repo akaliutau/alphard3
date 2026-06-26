@@ -1,0 +1,21 @@
+
+This demo shows our autonomous AI trader in action. 
+
+Named after the brightest star in the Hydra constellation, Alphard is a hybrid trading system that bridges the gap between black-box models and rigid rule-based strategies. By presenting market data visually to a multimodal AI agent, it enables direct price-action reasoning without relying on lagging indicators - combining human-like market interpretation with strict quantitative risk controls.
+
+Alphard fuses the intuitive visual reasoning of VLMs with the unmatched pattern-matching superpowers of LLMs—delivering human-like market interpretation backed by ruthless quantitative risk control. There are two core parts: the MT5 trading server in the cloud, and the Alphard advisory scheduler. Then we integrate the third part: an ensemble of watcher models that consumes the advice and decides whether to execute. 
+
+First, this is MetaTrader 5 running in the cloud. The terminal is visible through noVNC, so we can inspect the account, symbols, positions, and orders just like on a desktop terminal. Behind the UI is an API proxy implemented as a side-car service. The health endpoint tells us the service is alive, and the readiness endpoint checks that the MT5 bridge can actually initialize against the terminal. This API is a control point for all market data and order operations.
+
+Next, we look at the scheduler. Alphard does not run as an uncontrolled loop inside the container. The cloud VM timer starts a fresh one-shot process for each cycle (every 5, 15 or 30 min). In the logs, we see the app wake up, check that MT5 is ready, read the broker tick time, identify the current M1 basket, sync candles, and process the configured symbols. This design is important because each run is isolated and auditable. System takes a snapshot of the market, renders the charts, calls the Gemini to perform multi-modal analysis and records the advice - a market analysis and a plan of potential deal
+
+For each symbol, the system produces two views. We have implemented a rudimentary visualizer via this Colab-based analytical notebook.  The first is the global context: around 26 hours of M1 candles, used to classify whether the market is trending, ranging, compressing, or in chop. The second is the latest dynamics view: around 3 hours of M1 candles, focused on support, resistance, breakouts, sweeps, and retests. The model is not guessing from a single price; it is given structured visual and numeric context.
+
+The advice notebook shows the structured model output. The recommendation can be BUY, SELL, HOLD, or ERROR. When a trade is justified, the model produces an action plan with gradual legs, allocation percentages, entry zones, stop loss, take profit, invalidation rules, and risk notes. This is still advice only. 
+
+The third part is the watcher ensemble. The plan watcher validates the report and schema. The market-state watcher checks whether live price is still inside the planned trigger zone. The risk watcher checks exposure, spread, freshness, stop distance, and portfolio limits. Only when these watchers agree does the execution watcher translate one approved leg into an MT5 action. If any watcher rejects the setup, the system waits or cancels instead of forcing a trade.
+
+As you can see, we built an autonomous trading pipeline with clear boundaries. MT5 provides the market and execution interface. Alphard produces explainable analysis and advice. The watchers provide the execution judgment. Every stage writes logs and artifacts, so we can replay what happened, inspect the model reasoning, and understand exactly why a trade was or was not executed.
+
+The tests on paper trading showed excellent performance, accuracy and reliability of our approach.
+

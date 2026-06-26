@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import Any
 
 from core.models import Decision, RiskResult, SymbolInfo, Tick
+from core.pullback_ratio import build_pullback_limit_plan, is_pullback_ratio_strategy, pullback_ratio_for_leg
 from utilities.settings import config
 
 
@@ -22,6 +23,7 @@ class RiskEngine:
         checks = [
             self._check_not_error,
             self._check_not_hold,
+            self._check_model_evidence,
             self._check_confidence,
             self._check_position_cap,
         ]
@@ -49,6 +51,9 @@ class RiskEngine:
         entry_result = self._check_entry_price(decision, tick, symbol_info, entry)
         if entry_result is not None:
             return entry_result
+        chase_result = self._check_chase_progress(decision, entry)
+        if chase_result is not None:
+            return chase_result
         reward_risk_result = self._check_reward_risk(decision, entry)
         if reward_risk_result is not None:
             return reward_risk_result
@@ -85,6 +90,29 @@ class RiskEngine:
         d: Decision = ctx["decision"]
         if d.status == "HOLD":
             return RiskResult(False, "decision is HOLD")
+        return None
+
+    def _check_model_evidence(self, ctx: dict[str, Any]) -> RiskResult | None:
+        d: Decision = ctx["decision"]
+        if not config.require_evidence_confirmation or d.side is None:
+            return None
+
+        # Manual/unit-test Decision objects and the legacy plain-text parser have
+        # no model JSON payload. Enforce the evidence gate for the current JSON VLM
+        # contract, where parse_strategy_output sets raw_text to a non-empty marker.
+        if not d.raw_text:
+            return None
+
+        evidence = d.evidence or {}
+        confirmed = self._truthy(
+            evidence.get("confirmed_rebounce")
+            or evidence.get("confirmed_reflection")
+            or evidence.get("rebound_confirmed")
+        )
+        if not confirmed:
+            return RiskResult(False, "no confirmed rebound/reflection evidence in model output")
+        if self._truthy(evidence.get("too_late_to_chase")):
+            return RiskResult(False, "model marked setup as too late to chase")
         return None
 
     def _check_confidence(self, ctx: dict[str, Any]) -> RiskResult | None:
@@ -128,7 +156,7 @@ class RiskEngine:
         return None
 
     def _check_entry_price(self, d: Decision, tick: Tick, info: SymbolInfo, entry: float) -> RiskResult | None:
-        if config.execution_mode != "pending_limit":
+        if self._execution_mode(d) != "pending_limit":
             return None
 
         min_dist = self._protection_distance(info)
@@ -151,6 +179,29 @@ class RiskEngine:
             if abs(float(d.stop_loss) - entry) < min_dist:
                 return RiskResult(False, "SELL_LIMIT stop_loss too close to entry")
 
+        return None
+
+    def _check_chase_progress(self, d: Decision, entry: float) -> RiskResult | None:
+        evidence = d.evidence or {}
+        rebound = self._float_or_none(evidence.get("rebound_level"))
+        target = self._float_or_none(evidence.get("target_level"))
+        if target is None:
+            target = d.take_profit
+        if rebound is None or target is None or d.side is None:
+            return None
+
+        max_progress = self._clamp(float(config.max_chase_progress), 0.05, 0.95)
+        if d.side == "buy" and rebound < entry < float(target):
+            progress = (entry - rebound) / max(float(target) - rebound, 1e-12)
+        elif d.side == "sell" and rebound > entry > float(target):
+            progress = (rebound - entry) / max(rebound - float(target), 1e-12)
+        else:
+            # If the model supplies incompatible evidence geometry, the setup is
+            # not a clean post-rebound market entry. Keep it out of MT5.
+            return RiskResult(False, "rebound/target evidence does not match current market entry")
+
+        if progress > max_progress:
+            return RiskResult(False, f"too late to chase: {progress:.0%} of rebound-to-target path already consumed")
         return None
 
     def _check_reward_risk(self, d: Decision, entry: float) -> RiskResult | None:
@@ -208,7 +259,7 @@ class RiskEngine:
         return tick_size if tick_size > 0 else info.point
 
     def _entry_price(self, d: Decision, tick: Tick, info: SymbolInfo) -> float:
-        if config.execution_mode == "market":
+        if self._execution_mode(d) == "market":
             return round(tick.ask if d.side == "buy" else tick.bid, info.digits)
 
         if self._uses_pullback_ratio_entry() and d.stop_loss is not None:
@@ -226,36 +277,35 @@ class RiskEngine:
         if d.stop_loss is None:
             return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
 
-        ratio = self._pullback_ratio(split_leg)
-        min_gap = self._pending_limit_gap(info, multiplier=max(1, split_leg))
-        sl = float(d.stop_loss)
-
-        if d.side == "buy":
-            ref = tick.bid
-            if sl >= ref:
-                return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
-            entry = ref - (ref - sl) * ratio
-            entry = min(entry, ref - min_gap)
-            entry = max(entry, sl + info.point)
-        else:
-            ref = tick.ask
-            if sl <= ref:
-                return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
-            entry = ref + (sl - ref) * ratio
-            entry = max(entry, ref + min_gap)
-            entry = min(entry, sl - info.point)
-
-        return round(entry, info.digits)
+        plan = build_pullback_limit_plan(
+            side=d.side,
+            bid=tick.bid,
+            ask=tick.ask,
+            stop_loss=float(d.stop_loss),
+            ratio=float(config.pullback_ratio),
+            min_gap=self._pending_limit_gap(info, multiplier=max(1, split_leg)),
+            tick_size=self._tick_size(info),
+            digits=info.digits,
+            split_leg=split_leg,
+        )
+        if plan is None or plan.entry_price is None:
+            return self._entry_price_for_gap(d, tick, info, multiplier=split_leg)
+        return plan.entry_price
 
     def _pullback_ratio(self, split_leg: int = 1) -> float:
-        base = self._clamp(float(config.pullback_ratio), 0.05, 0.95)
-        if split_leg <= 1:
-            return base
-        # Put the second split order deeper toward SL so the two entries are not clustered.
-        return self._clamp(base + (1.0 - base) * 0.5, base, 0.95)
+        return pullback_ratio_for_leg(float(config.pullback_ratio), split_leg)
+
+    def _execution_mode(self, d: Decision) -> str:
+        # The new VLM contract returns order_kind="market" for confirmed
+        # post-rebound entries. Honour that even if an older environment file
+        # still has EXECUTION_MODE=pending_limit. Manual/legacy decisions keep
+        # using the configured mode.
+        if d.order_kind == "market":
+            return "market"
+        return config.execution_mode
 
     def _uses_pullback_ratio_entry(self) -> bool:
-        return config.strategy_name in {"pullback_ratio_strategy", "levels_pullback_ratio_strategy"}
+        return is_pullback_ratio_strategy(config.strategy_name)
 
     def _auto_correct_trade_geometry(self, d: Decision, info: SymbolInfo, entry: float) -> dict[str, Any]:
         """Repair deterministic, broker-checkable geometry before rejecting.
@@ -371,7 +421,7 @@ class RiskEngine:
             "tp_ratio": 1.0,
             "order_kind": d.order_kind,
         }
-        if not config.split_order_enabled or config.execution_mode != "pending_limit":
+        if not config.split_order_enabled or self._execution_mode(d) != "pending_limit":
             return [base]
 
         runner_ratio = self._clamp(float(config.split_order_ratio), 0.0, 1.0)
@@ -452,6 +502,23 @@ class RiskEngine:
     def _clamp(self, value: float, lower: float, upper: float) -> float:
         return max(lower, min(upper, value))
 
+    def _truthy(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return False
+
+    def _float_or_none(self, value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
     def _normalize_volume(self, requested: float, info: SymbolInfo, enforce_min: bool = True) -> float:
         if info.volume_max is not None:
             requested = min(requested, info.volume_max)
@@ -461,3 +528,5 @@ class RiskEngine:
         if enforce_min:
             volume = max(info.volume_min, volume)
         return round(volume, 8)
+
+

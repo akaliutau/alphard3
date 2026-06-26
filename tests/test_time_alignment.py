@@ -57,3 +57,5 @@ def test_broker_tick_time_msc_takes_precedence():
     broker_now = broker_now_from_tick(tick_time=123, tick_time_msc=broker_msc)
     assert broker_now == datetime(2026, 6, 17, 16, 14, 59, tzinfo=timezone.utc)
     assert current_basket_open(broker_now, "M15") == datetime(2026, 6, 17, 16, 0, tzinfo=timezone.utc)
+
+

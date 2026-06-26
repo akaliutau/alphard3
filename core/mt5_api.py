@@ -185,3 +185,5 @@ def _assert_trade_ok(payload: dict[str, Any], label: str) -> None:
     retcode = payload.get("retcode") or (payload.get("result") or {}).get("retcode")
     if retcode not in SUCCESS_RETCODES:
         raise MT5APIError(f"{label} retcode not success: {retcode}; payload={payload}")
+
+

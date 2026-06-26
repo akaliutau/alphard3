@@ -6,7 +6,8 @@ from typing import Any, Literal
 
 Side = Literal["buy", "sell"]
 DecisionStatus = Literal["BUY", "SELL", "HOLD", "ERROR"]
-OrderKind = Literal["limit", "stop", "stop_limit"]
+AdvisoryStatus = Literal["BUY", "SELL", "HOLD", "ERROR"]
+OrderKind = Literal["market", "limit", "stop", "stop_limit"]
 
 SUCCESS_RETCODES = {10008, 10009, 10010}
 
@@ -72,6 +73,35 @@ class Decision:
     order_kind: OrderKind = "limit"
     rationale: str = ""
     levels: dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    raw_text: str = ""
+    error: str | None = None
+
+    @property
+    def side(self) -> Side | None:
+        if self.status == "BUY":
+            return "buy"
+        if self.status == "SELL":
+            return "sell"
+        return None
+
+
+@dataclass
+class AdvisoryRecommendation:
+    """Analysis-only contract returned by the VLM.
+
+    This intentionally contains no MT5 request body. It is a structured
+    recommendation for a separate executor/human review layer.
+    """
+
+    status: AdvisoryStatus
+    confidence: float = 0.0
+    market_classification: dict[str, Any] = field(default_factory=dict)
+    latest_dynamics: dict[str, Any] = field(default_factory=dict)
+    action_plan: dict[str, Any] = field(default_factory=dict)
+    levels: dict[str, Any] = field(default_factory=dict)
+    risk_notes: list[str] = field(default_factory=list)
+    artifact: dict[str, Any] = field(default_factory=dict)
     raw_text: str = ""
     error: str | None = None
 
@@ -113,3 +143,5 @@ class ModelRunMeta:
     model: str
     chart_uri: str | None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+

@@ -132,3 +132,5 @@ def _same_day_ranges(start: datetime, end: datetime) -> list[tuple[datetime, dat
         cursor = chunk_end
 
     return ranges
+
+
