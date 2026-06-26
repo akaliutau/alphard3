@@ -63,6 +63,10 @@ For every configured symbol, the advisory engine builds two complementary views:
 
 The model is not given a single price in isolation. It sees wide context, local execution detail, positions, orders, tick data, symbol info, and deterministic visible levels.
 
+Picture below shows the example of rendered chart:
+
+![Rendered Global Chart](docs/charts_EURUSD_EURUSD_global_202606261601_1560bars_global_16x9.png)
+
 ## 🚀 What makes it different?
 
 <table>
@@ -154,6 +158,8 @@ flowchart LR
     Proxy -. live state .-> Watchers
     Executor -. optional order call .-> Proxy
 ```
+
+The architecture on high-level:
 
 ![GCP cloud architecture](docs/arch.v1.png)
 
