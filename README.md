@@ -42,10 +42,8 @@ https://drive.google.com/file/d/1i92IcMuiTxwtEXlTg89Rz1SbRv3REKHL/view
 Instead of asking an LLM to guess from raw numbers alone, Alphard renders market structure into charts, sends those charts plus live MT5 context to a multimodal model, 
 and stores a strict JSON advisory report for each market slot.
 
-The result is an auditable pipeline that can answer:
-
-> “What did the model see, what plan did it propose, which chart did it use, and why was a trade accepted, rejected, or ignored?”
-
+Alphard is a big project, spanning across several repositories. One of the auxilary services is MT5 Bridge, which allows to run MT5 in the cloud: Check out the service here: https://github.com/akaliutau/mt5proxy
+ 
 ## 🧠 Core idea
 
 Alphard treats a trading decision as a **visual reasoning task with deterministic guardrails**.
