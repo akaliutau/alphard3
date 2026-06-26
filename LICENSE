@@ -1,21 +1,70 @@
-MIT License
+PolyForm Noncommercial License 1.0.0
 
 Copyright (c) 2026 Aliaksei Kaliutau
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Purpose
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This license allows use of the software for noncommercial purposes.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Agreement
+
+In order to receive this license, you must agree to its rules. The rules of
+this license are both obligations (like a contract) and conditions (like a
+copyright license). You must not do anything with this software that triggers
+a rule that you cannot or will not follow.
+
+3. License Grant
+
+The licensor grants you a copyright license for the software to do everything
+you might do with the software that would otherwise infringe the licensor's
+copyright in it for any noncommercial purpose.
+
+4. Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose. Any commercial purpose is
+not.
+
+5. Commercial Purposes
+
+Commercial purposes include:
+
+  a. Uses available to the public where you charge a fee, ask for donations,
+     or use any other billing model;
+
+  b. Uses available to the public where you display advertising, sponsored
+     content, or other content providers pay for;
+
+  c. Uses available to the public where the software provides a service,
+     product, or other value that you use to sell a different service,
+     product, or value; and
+
+  d. Uses for your business, such as internal tools, data visualization,
+     or dashboarding.
+
+6. Patent License
+
+The licensor grants you a patent license for the software that covers patent
+claims the licensor can license, or becomes able to license, that you would
+infringe by using the software.
+
+7. Notices
+
+You must ensure that anyone who gets a copy of any part of the software from
+you also gets a copy of these terms or the URL for them.
+
+8. No Other Rights
+
+These terms do not imply any other license.
+
+9. Deprecation
+
+The licensor may continue to make the software available under this license,
+but they are not obligated to do so. The licensor may also release the
+software under different terms.
+
+10. Disclaimer
+
+AS FAR AS THE LAW ALLOWS, THE SOFTWARE COMES AS IS, WITHOUT ANY WARRANTY OR
+CONDITION, AND THE LICENSOR WILL NOT BE LIABLE TO YOU FOR ANY DAMAGES ARISING
+OUT OF THESE TERMS OR THE USE OR NATURE OF THE SOFTWARE, UNDER ANY KIND OF
+LEGAL CLAIM.

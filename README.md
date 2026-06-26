@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&height=230&color=0:0B1026,50:1B4D89,100:9D4EDD&text=Alphard&fontColor=ffffff&fontSize=76&fontAlignY=38&desc=Visual%20AI%20Trading%20Advisor%20for%20MetaTrader%205&descAlignY=58&descSize=19" alt="Alphard — Visual AI Trading Advisor for MetaTrader 5" />
+<img src="https://capsule-render.vercel.app/api?type=waving&height=230&color=0:0B1026,50:1B4D89,100:9D4EDD&text=Alphard&fontColor=ffffff&fontSize=76&fontAlignY=38&desc=Visual%20AI%20Trading%20Advisor%20for%20MetaTrader%205&descAlignY=58&descSize=19" alt="Alphard — Visual AI Trading System for MetaTrader 5" />
 
 <p>
   <strong>Multimodal market reasoning. Structured trade advice. Cloud-native auditability.</strong>
@@ -27,7 +27,7 @@
 ---
 
 > [!IMPORTANT]
-> **Alphard is a research and advisory system, not financial advice.** The current live runtime is designed to generate structured recommendations and artifacts. It does **not** place or cancel MT5 orders in the advisory path. Any execution must be handled by a separate, independently validated executor or human review process.
+> **Alphard is a research and advisory system, not financial advice.** The current live runtime has fully automatic and semi-automatic mode. Any execution must be handled by a separate, independently validated executor (see other repositories in Alphard project) or human review process. AI can make mistakes.
 
 ## ✨ What is Alphard?
 
@@ -36,7 +36,8 @@
 - the intuitive, visual price-action reading of a human trader;
 - the repeatability, logging, and risk discipline of automated systems.
 
-Instead of asking an LLM to guess from raw numbers alone, Alphard renders market structure into charts, sends those charts plus live MT5 context to a multimodal model, and stores a strict JSON advisory report for each market slot.
+Instead of asking an LLM to guess from raw numbers alone, Alphard renders market structure into charts, sends those charts plus live MT5 context to a multimodal model, 
+and stores a strict JSON advisory report for each market slot.
 
 The result is an auditable pipeline that can answer:
 
@@ -307,12 +308,26 @@ Consumers should always start from the static pointer:
 
 ## Quick start
 
-### 1. Create a virtual environment
+### 1. Install
+
+Clone the repository:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+git clone https://github.com/akaliutau/alphard3.git
+cd alphard3
+```
+
+Create and activate a Conda environment:
+
+```bash
+conda create -n alphard3 python=3.12 -y
+conda activate alphard3
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.indexframe.txt
 ```
 
 ### 2. Create a local environment file
@@ -334,7 +349,7 @@ RUN_INTERVAL_MINUTES=15
 CANDLE_CLOSE_DELAY_SECONDS=30
 
 MT5_BASE_URL=http://127.0.0.1:8000
-MT5_API_KEY=dev-api-key
+MT5_API_KEY=dev-api-key # auto-generated and printed in console when you deploy mt5proxy instance
 MT5_TIMEOUT_SECONDS=30
 
 SYMBOLS=EURUSD,GBPUSD
@@ -610,7 +625,7 @@ The deployment uses `flock` to prevent overlap. If cycles regularly approach the
 - Probabilistic barrier-outcome model: estimate `TP-first`, `SL-first`, and `timeout` probabilities directly.
 - Portfolio-level exposure optimizer across correlated FX symbols.
 
-## Demo narrative
+## In short
 
 Alphard is easiest to understand as a three-layer system:
 
@@ -622,7 +637,14 @@ That separation keeps the system explainable. Every stage leaves artifacts behin
 
 ## License
 
-TBD. Add a license file before publishing or distributing this project.
+Source Available / Non-Commercial Use Only
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)
+
+✅ Allowed: You may read, run, modify, and use this code for personal research, education, or hobbyist projects.
+
+❌ Forbidden: You may not use this code for any commercial purpose. This includes selling the software, using it to manage third-party funds for a fee, or using it as part of a paid/for-profit projects.
+
 
 ---
 
