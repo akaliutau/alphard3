@@ -152,6 +152,9 @@ flowchart LR
     Executor -. optional order call .-> Proxy
 ```
 
+![GCP cloud architecture](docs/arch.v1.png)
+
+
 ## Runtime workflow
 
 ```mermaid
