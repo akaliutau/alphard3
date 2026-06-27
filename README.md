@@ -10,7 +10,7 @@
   <a href="#"><img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white"></a>
   <a href="#"><img alt="MetaTrader 5" src="https://img.shields.io/badge/MetaTrader-5-0052CC?style=for-the-badge"></a>
   <a href="#"><img alt="Google Cloud" src="https://img.shields.io/badge/Google%20Cloud-Vertex%20AI%20%2B%20GCS-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white"></a>
-  <a href="#"><img alt="Advisory only" src="https://img.shields.io/badge/Mode-Advisory%20Only-00C853?style=for-the-badge"></a>
+  <a href="#"><img alt="AI Trading" src="https://img.shields.io/badge/Mode-Advisory%20Only-00C853?style=for-the-badge"></a>
   <a href="#"><img alt="Tests" src="https://img.shields.io/badge/Tests-pytest-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white"></a>
 </p>
 
